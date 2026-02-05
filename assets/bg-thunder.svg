@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1200" preserveAspectRatio="xMidYMid slice">
+  <g fill="#ffffff" opacity="0.12">
+    <circle cx="270" cy="270" r="96" />
+    <circle cx="390" cy="240" r="124" />
+    <circle cx="520" cy="282" r="92" />
+    <rect x="190" y="282" width="450" height="160" rx="80" />
+  </g>
+  <path
+    d="M420 455l-70 120h70l-50 120 150-190h-86l36-170z"
+    fill="#ffffff"
+    opacity="0.16"
+  />
+  <g opacity="0.08" stroke="#ffffff" stroke-width="8" fill="none">
+    <path d="M60 980c110-30 195-30 305 0 110 30 195 30 305 0" />
+    <path d="M60 1040c110-30 195-30 305 0 110 30 195 30 305 0" opacity="0.65" />
+  </g>
+</svg>
+
