@@ -22,6 +22,7 @@ const ui = {
   suggestions: $("#suggestions"),
   recent: $("#recent"),
   status: $("#status"),
+  clock: $("#clock"),
   current: $("#current"),
   forecast: $("#forecast"),
   sheetBackdrop: $("#sheetBackdrop"),
@@ -263,7 +264,10 @@ function wmoInfo(code, isDay = true) {
 }
 
 let lastWxScene = null;
+let lastWxBright = false;
 let bgFadeTimer = null;
+let currentClockTimeout = null;
+let currentClockInterval = null;
 
 function wxSceneFromWmo(code, isDay) {
   const c = Number(code);
@@ -285,16 +289,22 @@ function wxSceneFromCurrent(current) {
   return wxSceneFromWmo(current?.weather_code, isDay);
 }
 
-function setWxScene(scene) {
+function setWxScene(scene, { bright = false } = {}) {
+  const nextBright = Boolean(bright);
   if (!scene) {
     lastWxScene = null;
+    lastWxBright = false;
     delete document.documentElement.dataset.wx;
+    delete document.documentElement.dataset.wxBright;
     return;
   }
 
-  if (scene === lastWxScene) return;
+  if (scene === lastWxScene && nextBright === lastWxBright) return;
   lastWxScene = scene;
+  lastWxBright = nextBright;
   document.documentElement.dataset.wx = scene;
+  if (nextBright) document.documentElement.dataset.wxBright = "1";
+  else delete document.documentElement.dataset.wxBright;
 
   if (ui.bg) {
     if (bgFadeTimer) window.clearTimeout(bgFadeTimer);
@@ -310,7 +320,10 @@ function applyWeatherBackground() {
     return;
   }
 
-  setWxScene(wxSceneFromCurrent(current));
+  const isDay = Boolean(current?.is_day);
+  const code = Number(current?.weather_code);
+  const bright = isDay && code === 0;
+  setWxScene(wxSceneFromCurrent(current), { bright });
 }
 
 function getTelegramLocationManager() {
@@ -639,6 +652,48 @@ function hourlyToEndOfDayItems() {
   return items;
 }
 
+function hourlyNextHoursItems(hoursAhead = 12) {
+  const hourly = state.forecast?.hourly;
+  const time = hourly?.time;
+  if (!Array.isArray(time) || time.length === 0) return [];
+
+  const limit = Math.max(0, Math.floor(Number(hoursAhead) || 0));
+  if (!limit) return [];
+
+  const baseTime = String(state.forecast?.current?.time || time[0] || "");
+  const start = ceilToHourISO(baseTime) || String(time[0] || "");
+  if (!start) return [];
+
+  const temperature = Array.isArray(hourly.temperature_2m) ? hourly.temperature_2m : [];
+  const code = Array.isArray(hourly.weather_code) ? hourly.weather_code : [];
+  const isDay = Array.isArray(hourly.is_day) ? hourly.is_day : [];
+  const precipProb = Array.isArray(hourly.precipitation_probability) ? hourly.precipitation_probability : null;
+
+  const items = [];
+  for (let i = 0; i < time.length; i++) {
+    const ts = time[i];
+    if (typeof ts !== "string") continue;
+    if (ts < start) continue;
+
+    const t = Number(temperature[i]);
+    const wmo = Number(code[i]);
+    const d = isDay[i];
+    const pop = precipProb ? Number(precipProb[i]) : NaN;
+
+    items.push({
+      time: ts.slice(11, 16),
+      temp: Number.isFinite(t) ? Math.round(t) : null,
+      wmo,
+      isDay: d === 1 || d === true,
+      pop: Number.isFinite(pop) ? Math.round(pop) : null,
+    });
+
+    if (items.length >= limit) break;
+  }
+
+  return items;
+}
+
 function bindWheelToHorizontalScroll(el) {
   if (!el || el.dataset.wheelScrollBound) return;
   el.dataset.wheelScrollBound = "1";
@@ -899,9 +954,125 @@ function renderRecent() {
   bindWheelToHorizontalScroll(ui.recent);
 }
 
+function formatUtcOffset(seconds) {
+  const s = Number(seconds);
+  if (!Number.isFinite(s)) return "";
+
+  const sign = s >= 0 ? "+" : "-";
+  const abs = Math.abs(s);
+  const hh = Math.floor(abs / 3600);
+  const mm = Math.floor((abs % 3600) / 60);
+  const hm = mm ? `${hh}:${String(mm).padStart(2, "0")}` : String(hh);
+  return `UTC${sign}${hm}`;
+}
+
+function stopCurrentClock() {
+  if (currentClockTimeout) {
+    window.clearTimeout(currentClockTimeout);
+    currentClockTimeout = null;
+  }
+  if (currentClockInterval) {
+    window.clearInterval(currentClockInterval);
+    currentClockInterval = null;
+  }
+}
+
+function startCurrentClock({ timeZone, timeZoneAbbr, utcOffsetSeconds } = {}) {
+  stopCurrentClock();
+
+  if (!ui.clock) return;
+
+  const timeEl = ui.clock.querySelector("[data-clock-time]");
+  const tzEl = ui.clock.querySelector("[data-clock-tz]");
+  if (!timeEl || !tzEl) return;
+
+  const tz = typeof timeZone === "string" ? timeZone.trim() : "";
+  const abbr = typeof timeZoneAbbr === "string" ? timeZoneAbbr.trim() : "";
+  const offset = formatUtcOffset(utcOffsetSeconds);
+
+  tzEl.textContent = (abbr && offset ? `${abbr} (${offset})` : abbr || offset || tz) || "—";
+  tzEl.title = tz || "";
+
+  let fmt = null;
+  let canUseIntlTimeZone = false;
+  try {
+    fmt = new Intl.DateTimeFormat("ru-RU", {
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZone: tz || undefined,
+    });
+    canUseIntlTimeZone = Boolean(tz);
+  } catch {
+    fmt = new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  }
+
+  const tick = () => {
+    try {
+      if (canUseIntlTimeZone) {
+        timeEl.textContent = fmt.format(new Date());
+        return;
+      }
+
+      const offsetSeconds = Number(utcOffsetSeconds);
+      if (Number.isFinite(offsetSeconds)) {
+        const d = new Date(Date.now() + offsetSeconds * 1000);
+        const hh = String(d.getUTCHours()).padStart(2, "0");
+        const mm = String(d.getUTCMinutes()).padStart(2, "0");
+        timeEl.textContent = `${hh}:${mm}`;
+        return;
+      }
+
+      timeEl.textContent = fmt.format(new Date());
+    } catch {
+      timeEl.textContent = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+    }
+  };
+
+  tick();
+
+  const msToNextMinute = 60000 - (Date.now() % 60000);
+  currentClockTimeout = window.setTimeout(() => {
+    tick();
+    currentClockInterval = window.setInterval(tick, 60000);
+  }, msToNextMinute + 50);
+}
+
+function renderClock() {
+  if (!ui.clock) return;
+
+  const cur = state.forecast?.current;
+  if (!cur || typeof cur !== "object") {
+    stopCurrentClock();
+    ui.clock.hidden = true;
+    ui.clock.innerHTML = "";
+    return;
+  }
+
+  ui.clock.hidden = false;
+  ui.clock.innerHTML = `
+    <div class="clock__label">Местное время</div>
+    <div class="clock__value">
+      <span class="clock__time" data-clock-time>—</span>
+      <span class="clock__sep">•</span>
+      <span class="clock__tz" data-clock-tz>—</span>
+    </div>
+  `;
+
+  startCurrentClock({
+    timeZone: state.forecast?.timezone || state.location?.timezone,
+    timeZoneAbbr: state.forecast?.timezone_abbreviation,
+    utcOffsetSeconds: state.forecast?.utc_offset_seconds,
+  });
+}
+
 function renderCurrent() {
   const cur = state.forecast?.current;
   if (!cur || typeof cur !== "object") {
+    stopCurrentClock();
+    if (ui.clock) {
+      ui.clock.hidden = true;
+      ui.clock.innerHTML = "";
+    }
     ui.current.hidden = true;
     ui.current.innerHTML = "";
     return;
@@ -918,12 +1089,12 @@ function renderCurrent() {
   const p = formatPressureHpa(cur.pressure_msl ?? cur.surface_pressure);
   const desc = info.label;
 
-  const hourlyItems = hourlyToEndOfDayItems();
+  const hourlyItems = hourlyNextHoursItems(12);
   const hourlyHtml = hourlyItems.length
     ? `
       <div class="current__hourly">
-        <div class="current__hourly-title">По часам до конца дня</div>
-        <div class="hourly" data-hourly-scroll role="list" aria-label="Погода по часам до конца дня">
+        <div class="current__hourly-title">По часам на 12 часов вперёд</div>
+        <div class="hourly" data-hourly-scroll role="list" aria-label="Погода по часам на 12 часов вперёд">
           ${hourlyItems
             .map((x) => {
               const infoH = wmoInfo(x.wmo, x.isDay);
@@ -944,7 +1115,7 @@ function renderCurrent() {
     `
     : "";
 
-  const tips = buildTodayRecommendations({ hourlyItems });
+  const tips = buildTodayRecommendations({ hourlyItems: hourlyToEndOfDayItems() });
   const tipsHtml = tips.length
     ? `
       <div class="current__tips">
@@ -1053,9 +1224,10 @@ function openDetails(idx) {
   const dateISO = daily.time?.[idx];
   if (!dateISO) return;
 
-  setWxScene(wxSceneFromWmo(daily.weather_code?.[idx], true));
+  const wmo = Number(daily.weather_code?.[idx]);
+  setWxScene(wxSceneFromWmo(wmo, true), { bright: wmo === 0 });
 
-  const info = wmoInfo(daily.weather_code?.[idx], true);
+  const info = wmoInfo(wmo, true);
   const { w, dm } = dayLabel(dateISO);
   const max = Math.round(daily.temperature_2m_max?.[idx]);
   const min = Math.round(daily.temperature_2m_min?.[idx]);
@@ -1167,6 +1339,7 @@ function renderAll() {
   ui.subtitle.textContent = loc ? formatPlace(loc) : "Выберите город или используйте геолокацию";
 
   renderRecent();
+  renderClock();
   renderCurrent();
   applyWeatherBackground();
   renderForecast();

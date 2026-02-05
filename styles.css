@@ -397,6 +397,44 @@ body {
   gap: 10px;
 }
 
+.clock {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 12px 14px;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.clock__label {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.clock__value {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.clock__time {
+  color: var(--fg);
+  font-weight: 900;
+  letter-spacing: -0.2px;
+}
+
+.clock__sep,
+.clock__tz {
+  color: var(--muted);
+  font-weight: 700;
+}
+
 .current__top {
   display: flex;
   align-items: center;
@@ -807,6 +845,12 @@ body {
   --bg-c1: rgba(110, 231, 255, 0.22);
   --bg-c2: rgba(167, 139, 250, 0.18);
   --bg-c3: rgba(34, 197, 94, 0.10);
+}
+
+:root[data-wx="clear-day"][data-wx-bright="1"] {
+  --bg-c1: rgba(110, 231, 255, 0.26);
+  --bg-c2: rgba(167, 139, 250, 0.20);
+  --bg-c3: rgba(34, 197, 94, 0.11);
 }
 
 :root[data-wx="clear-night"] {
