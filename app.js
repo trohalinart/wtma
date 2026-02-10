@@ -8,6 +8,7 @@ const state = {
   forecast: null, // api payload
   aborter: null,
   searchAborter: null,
+  tgMainBound: false,
 };
 
 const ui = {
@@ -246,18 +247,18 @@ function withTimeout(promise, ms, label = "timeout") {
 
 function wmoInfo(code, isDay = true) {
   const c = Number(code);
-  const base = { label: "Неизвестно", icon: iconCloud() };
+  const base = { label: "Неизвестно", icon: iconCloudLegacy() };
 
-  if (c === 0) return { label: "Ясно", icon: isDay ? iconSun() : iconMoon() };
-  if (c === 1) return { label: "Малооблачно", icon: isDay ? iconPartlyCloudy() : iconNightCloudy() };
-  if (c === 2) return { label: "Переменная облачность", icon: iconPartlyCloudy() };
-  if (c === 3) return { label: "Пасмурно", icon: iconCloud() };
+  if (c === 0) return { label: "Ясно", icon: isDay ? iconSunLegacy() : iconMoon() };
+  if (c === 1) return { label: "Малооблачно", icon: isDay ? iconPartlyCloudyLegacy() : iconNightCloudy() };
+  if (c === 2) return { label: "Переменная облачность", icon: iconPartlyCloudySvg() };
+  if (c === 3) return { label: "Пасмурно", icon: iconCloudLegacy() };
   if ([45, 48].includes(c)) return { label: "Туман", icon: iconFog() };
-  if (c >= 51 && c <= 57) return { label: "Морось", icon: iconDrizzle() };
-  if (c >= 61 && c <= 67) return { label: "Дождь", icon: iconRain() };
-  if (c >= 71 && c <= 77) return { label: "Снег", icon: iconSnow() };
-  if (c >= 80 && c <= 82) return { label: "Ливни", icon: iconRain() };
-  if (c >= 85 && c <= 86) return { label: "Снегопад", icon: iconSnow() };
+  if (c >= 51 && c <= 57) return { label: "Морось", icon: iconRainLegacy() };
+  if (c >= 61 && c <= 67) return { label: "Дождь", icon: iconRainLegacy() };
+  if (c >= 71 && c <= 77) return { label: "Снег", icon: iconSnowLegacy() };
+  if (c >= 80 && c <= 82) return { label: "Ливни", icon: iconRainLegacy() };
+  if (c >= 85 && c <= 86) return { label: "Снегопад", icon: iconSnowLegacy() };
   if (c >= 95 && c <= 99) return { label: "Гроза", icon: iconThunder() };
 
   return base;
@@ -328,6 +329,7 @@ function applyWeatherBackground() {
 
 function getTelegramLocationManager() {
   const tg = getTelegram();
+  if (!tg || !tgIsVersionAtLeast(tg, "8.0")) return null;
   const lm = tg?.LocationManager;
   if (!lm || typeof lm.getLocation !== "function") return null;
   return lm;
@@ -335,7 +337,7 @@ function getTelegramLocationManager() {
 
 function promptOpenTgLocationSettings() {
   const tg = getTelegram();
-  const lm = tg?.LocationManager;
+  const lm = getTelegramLocationManager();
   if (!tg || !lm || typeof lm.openSettings !== "function") return;
 
   if (typeof tg.showPopup === "function") {
@@ -388,8 +390,13 @@ async function resolveCoordsToForecast(lat, lon, { fallbackName = "Моё мес
     ui.btnClear.hidden = true;
     loadForecast(loc);
   } catch (err) {
-    console.error(err);
-    setStatus("Не удалось определить город по координатам.", "error");
+    // Reverse geocoding is optional: still show forecast by coordinates.
+    console.warn(err);
+    const loc = { name: fallbackName, latitude: lat, longitude: lon };
+    hideSuggestions();
+    ui.cityInput.value = "";
+    ui.btnClear.hidden = true;
+    loadForecast(loc);
   }
 }
 
@@ -480,61 +487,162 @@ function geoDiagShort(lm) {
   return parts.join(" | ");
 }
 
-function iconSun() {
-  return `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M12 18a6 6 0 1 1 0-12 6 6 0 0 1 0 12Zm0-14a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0V5a1 1 0 0 1 1-1Zm0 16a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0v-1a1 1 0 0 1 1-1ZM4 11a1 1 0 0 1 1 1 1 1 0 1 1-2 0 1 1 0 0 1 1-1Zm16 0a1 1 0 0 1 1 1 1 1 0 1 1-2 0 1 1 0 0 1 1-1ZM6.05 6.05a1 1 0 0 1 1.414 0l.707.707a1 1 0 1 1-1.414 1.414l-.707-.707a1 1 0 0 1 0-1.414Zm10.486 10.486a1 1 0 0 1 1.414 0l.707.707a1 1 0 0 1-1.414 1.414l-.707-.707a1 1 0 0 1 0-1.414Zm2.121-10.486a1 1 0 0 1 0 1.414l-.707.707a1 1 0 1 1-1.414-1.414l.707-.707a1 1 0 0 1 1.414 0ZM8.172 16.536a1 1 0 0 1 0 1.414l-.707.707a1 1 0 0 1-1.414-1.414l.707-.707a1 1 0 0 1 1.414 0Z"/></svg>`;
+function iconEmoji(symbol, label) {
+  const safeSymbol = escapeHtml(symbol || "");
+  if (!label) return `<span class="wx-emoji" aria-hidden="true">${safeSymbol}</span>`;
+  const safeLabel = escapeHtml(label);
+  return `<span class="wx-emoji" role="img" aria-label="${safeLabel}">${safeSymbol}</span>`;
 }
+
+function iconSvg(src, label) {
+  const safeSrc = escapeHtml(src || "");
+  const safeLabel = escapeHtml(label || "");
+  return `<img class="wx-icon" src="${safeSrc}" alt="${safeLabel}" loading="lazy" decoding="async" />`;
+}
+
+function iconSunLegacy() {
+  return iconEmoji("\u2600\uFE0F", "\u042f\u0441\u043d\u043e");
+}
+
+
+
+
+function iconCloudLegacy() {
+  return iconEmoji("\u2601\uFE0F", "\u041f\u0430\u0441\u043c\u0443\u0440\u043d\u043e");
+}
+
+
+
+
+function iconPartlyCloudyLegacy() {
+  return iconEmoji("\u26C5\uFE0F", "\u041f\u0435\u0440\u0435\u043c\u0435\u043d\u043d\u0430\u044f \u043e\u0431\u043b\u0430\u0447\u043d\u043e\u0441\u0442\u044c");
+}
+
+function iconPartlyCloudySvg() {
+  return iconSvg("./images/partly_cloudy.svg", "Переменная облачность");
+}
+
+
+
+
+function iconRainLegacy() {
+  return iconEmoji("\u{1F327}\uFE0F", "\u0414\u043e\u0436\u0434\u044c");
+}
+
+
+
+
+function iconSnowLegacy() {
+  return iconEmoji("\u{1F328}\uFE0F", "\u0421\u043d\u0435\u0433");
+}
+
+
+
+
+function iconSun() {
+  return iconSunLegacy();
+}
+
+
+
 
 function iconMoon() {
-  return `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M21 14.5A8.5 8.5 0 0 1 9.5 3a7.5 7.5 0 1 0 11.5 11.5Z"/></svg>`;
+  return iconEmoji("\u{1F319}", "\u041d\u043e\u0447\u044c");
 }
+
+
+
 
 function iconCloud() {
-  return `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M7 18a5 5 0 1 1 .8-9.94A6 6 0 0 1 19 12a4 4 0 0 1-1 7.87H7Z"/></svg>`;
+  return iconCloudLegacy();
 }
+
+
+
 
 function iconPartlyCloudy() {
-  return `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M7 18a5 5 0 1 1 .7-9.95A5 5 0 0 1 17 8a4 4 0 0 1 1 7.87H7Z"/><path fill="currentColor" opacity=".9" d="M10 3a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0V4a1 1 0 0 1 1-1Zm-6 7a1 1 0 0 1 1-1h1a1 1 0 1 1 0 2H5a1 1 0 0 1-1-1Zm9.95-5.95a1 1 0 0 1 1.41 0l.7.7a1 1 0 0 1-1.41 1.42l-.7-.71a1 1 0 0 1 0-1.41Z"/></svg>`;
+  return iconPartlyCloudyLegacy();
 }
+
+
+
 
 function iconNightCloudy() {
-  return `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M21 14.5A7.5 7.5 0 0 1 11 4.2 5 5 0 0 1 18 12a4 4 0 0 1 0 8H7a5 5 0 1 1 .8-9.94 6 6 0 0 1 2.2-3.2 8.5 8.5 0 0 0 11 7.64Z" opacity=".9"/></svg>`;
+  return iconSvg("./images/cloudy_moon.svg", "Облачно ночью");
 }
+
+
+
 
 function iconFog() {
-  return `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M7 14a5 5 0 1 1 .8-9.94A6 6 0 0 1 19 8a4 4 0 0 1-1 7.87H7Z"/><path fill="currentColor" opacity=".55" d="M4 17a1 1 0 1 1 0-2h16a1 1 0 1 1 0 2H4Zm2 4a1 1 0 1 1 0-2h12a1 1 0 1 1 0 2H6Z"/></svg>`;
+  return iconEmoji("\u{1F32B}\uFE0F", "\u0422\u0443\u043c\u0430\u043d");
 }
+
+
+
 
 function iconDrizzle() {
-  return `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M7 12a5 5 0 1 1 .8-9.94A6 6 0 0 1 19 6a4 4 0 0 1-1 7.87H7Z"/><path fill="currentColor" opacity=".7" d="M8 20a1 1 0 0 1-.9-1.44l1-2a1 1 0 0 1 1.8.88l-1 2A1 1 0 0 1 8 20Zm5 1a1 1 0 0 1-.9-1.44l1-2a1 1 0 1 1 1.8.88l-1 2A1 1 0 0 1 13 21Zm5-1a1 1 0 0 1-.9-1.44l1-2a1 1 0 1 1 1.8.88l-1 2A1 1 0 0 1 18 20Z"/></svg>`;
+  return iconEmoji("\u{1F326}\uFE0F", "\u041c\u043e\u0440\u043e\u0441\u044c");
 }
+
+
+
 
 function iconRain() {
-  return `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M7 12a5 5 0 1 1 .8-9.94A6 6 0 0 1 19 6a4 4 0 0 1-1 7.87H7Z"/><path fill="currentColor" opacity=".75" d="M8 21a1 1 0 0 1-.95-1.32l1.6-4.6a1 1 0 0 1 1.9.64l-1.6 4.6A1 1 0 0 1 8 21Zm6 0a1 1 0 0 1-.95-1.32l1.6-4.6a1 1 0 0 1 1.9.64l-1.6 4.6A1 1 0 0 1 14 21Z"/></svg>`;
+  return iconRainLegacy();
 }
+
+
+
+
+function iconSunshower() {
+  return iconEmoji("\u{1F326}\uFE0F", "\u041b\u0438\u0432\u0435\u043d\u044c \u0441 \u0441\u043e\u043b\u043d\u0446\u0435\u043c");
+}
+
+
+
 
 function iconSnow() {
-  return `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M7 12a5 5 0 1 1 .8-9.94A6 6 0 0 1 19 6a4 4 0 0 1-1 7.87H7Z"/><path fill="currentColor" opacity=".78" d="M9 16.5a1 1 0 0 1 1 1V18h.5a1 1 0 1 1 0 2H10v.5a1 1 0 1 1-2 0V20H7.5a1 1 0 1 1 0-2H8v-.5a1 1 0 0 1 1-1Zm6 0a1 1 0 0 1 1 1V18h.5a1 1 0 1 1 0 2H16v.5a1 1 0 1 1-2 0V20h-.5a1 1 0 1 1 0-2H14v-.5a1 1 0 0 1 1-1Z"/></svg>`;
+  return iconSnowLegacy();
 }
+
+
+
 
 function iconThunder() {
-  return `<svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M7 12a5 5 0 1 1 .8-9.94A6 6 0 0 1 19 6a4 4 0 0 1-1 7.87H7Z"/><path fill="currentColor" opacity=".85" d="M13 13a1 1 0 0 1 .86 1.5l-1.3 2.2H14a1 1 0 0 1 .8 1.6l-3 4a1 1 0 0 1-1.8-.8l1.2-2.8H10a1 1 0 0 1-.83-1.56l2.9-4A1 1 0 0 1 13 13Z"/></svg>`;
+  return iconEmoji("\u26C8\uFE0F", "\u0413\u0440\u043e\u0437\u0430");
 }
+
+
+
 
 function iconMiniWind() {
-  return `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M4 8a1 1 0 0 1 1-1h9a2 2 0 1 0-2-2 1 1 0 1 1 2 0 4 4 0 1 1-4 4H5a1 1 0 0 1-1-1Zm0 6a1 1 0 0 1 1-1h12a3 3 0 1 1-3 3 1 1 0 1 1 2 0 1 1 0 1 0 1-1H5a1 1 0 0 1-1-1Zm0 4a1 1 0 0 1 1-1h6a2 2 0 1 0-2-2 1 1 0 1 1 2 0 4 4 0 1 1-4 4H5a1 1 0 0 1-1-1Z"/></svg>`;
+  return iconEmoji("\u{1F4A8}");
 }
+
+
+
 
 function iconMiniDrop() {
-  return `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 2s7 8 7 13a7 7 0 1 1-14 0c0-5 7-13 7-13Zm0 18a5 5 0 0 0 5-5c0-3.5-3.3-8-5-10-1.7 2-5 6.5-5 10a5 5 0 0 0 5 5Z"/></svg>`;
+  return iconEmoji("\u{1F4A7}");
 }
+
+
+
 
 function iconMiniPressure() {
-  return `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 4a8 8 0 1 0 8 8 8 8 0 0 0-8-8Zm0 2a6 6 0 1 1-6 6 6 6 0 0 1 6-6Zm0 2a1 1 0 0 1 1 1v2.59l2.3-2.3a1 1 0 1 1 1.4 1.42l-4 4A1 1 0 0 1 11 14v-3a1 1 0 0 1 1-1Z" opacity=".92"/></svg>`;
+  return iconEmoji("\u{1F9ED}");
 }
 
+
+
+
 function iconMiniUnits() {
-  return `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M4 7a2 2 0 0 1 2-2h14v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7Zm2 0v12h12V7H6Zm2 2h2v2H8V9Zm0 4h4v2H8v-2Zm0 4h3v2H8v-2Zm6-8h2v2h-2V9Zm0 4h2v2h-2v-2Z"/></svg>`;
+  return iconEmoji("\u{1F321}\uFE0F");
 }
+
+
+
 
 function formatPlace(loc) {
   const parts = [loc?.name, loc?.admin1, loc?.country].filter(Boolean);
@@ -803,10 +911,34 @@ async function searchPlaces(query, { signal } = {}) {
 }
 
 async function reversePlace(lat, lon, { signal } = {}) {
-  const url = `https://geocoding-api.open-meteo.com/v1/reverse?latitude=${encodeURIComponent(lat)}&longitude=${encodeURIComponent(lon)}&language=ru&format=json`;
-  const data = await apiJson(url, { signal });
-  const first = Array.isArray(data?.results) ? data.results[0] : null;
-  return first;
+  const url = new URL("https://nominatim.openstreetmap.org/reverse");
+  url.searchParams.set("format", "jsonv2");
+  url.searchParams.set("lat", String(lat));
+  url.searchParams.set("lon", String(lon));
+  // Keep it at city level to avoid returning POIs/stores.
+  url.searchParams.set("zoom", "10");
+  url.searchParams.set("addressdetails", "1");
+  url.searchParams.set("accept-language", "ru");
+
+  const data = await apiJson(url.toString(), { signal });
+  const addr = data?.address || {};
+
+  const name = addr.city || addr.town || addr.village || addr.hamlet || addr.municipality || data?.name || null;
+  if (!name) return null;
+
+  const admin1 = addr.state || addr.region || addr.state_district || addr.county || null;
+  const country = addr.country || null;
+
+  const latitude = Number(data?.lat ?? lat);
+  const longitude = Number(data?.lon ?? lon);
+
+  return {
+    name,
+    admin1,
+    country,
+    latitude: Number.isFinite(latitude) ? latitude : lat,
+    longitude: Number.isFinite(longitude) ? longitude : lon,
+  };
 }
 
 function forecastUrl(lat, lon) {
@@ -982,6 +1114,7 @@ function startCurrentClock({ timeZone, timeZoneAbbr, utcOffsetSeconds } = {}) {
 
   if (!ui.clock) return;
 
+  const dateEl = ui.clock.querySelector("[data-clock-date]");
   const timeEl = ui.clock.querySelector("[data-clock-time]");
   const tzEl = ui.clock.querySelector("[data-clock-tz]");
   if (!timeEl || !tzEl) return;
@@ -993,23 +1126,33 @@ function startCurrentClock({ timeZone, timeZoneAbbr, utcOffsetSeconds } = {}) {
   tzEl.textContent = (abbr && offset ? `${abbr} (${offset})` : abbr || offset || tz) || "—";
   tzEl.title = tz || "";
 
-  let fmt = null;
+  let timeFmt = null;
+  let dateFmt = null;
   let canUseIntlTimeZone = false;
   try {
-    fmt = new Intl.DateTimeFormat("ru-RU", {
+    timeFmt = new Intl.DateTimeFormat("ru-RU", {
       hour: "2-digit",
       minute: "2-digit",
       timeZone: tz || undefined,
     });
+    dateFmt = new Intl.DateTimeFormat("ru-RU", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      timeZone: tz || undefined,
+    });
     canUseIntlTimeZone = Boolean(tz);
   } catch {
-    fmt = new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" });
+    timeFmt = new Intl.DateTimeFormat("ru-RU", { hour: "2-digit", minute: "2-digit" });
+    dateFmt = new Intl.DateTimeFormat("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
   }
 
   const tick = () => {
     try {
       if (canUseIntlTimeZone) {
-        timeEl.textContent = fmt.format(new Date());
+        const now = new Date();
+        timeEl.textContent = timeFmt.format(now);
+        if (dateEl) dateEl.textContent = dateFmt.format(now);
         return;
       }
 
@@ -1019,12 +1162,21 @@ function startCurrentClock({ timeZone, timeZoneAbbr, utcOffsetSeconds } = {}) {
         const hh = String(d.getUTCHours()).padStart(2, "0");
         const mm = String(d.getUTCMinutes()).padStart(2, "0");
         timeEl.textContent = `${hh}:${mm}`;
+        if (dateEl) {
+          const dd = String(d.getUTCDate()).padStart(2, "0");
+          const mo = String(d.getUTCMonth() + 1).padStart(2, "0");
+          const yyyy = String(d.getUTCFullYear());
+          dateEl.textContent = `${dd}.${mo}.${yyyy}`;
+        }
         return;
       }
 
-      timeEl.textContent = fmt.format(new Date());
+      const now = new Date();
+      timeEl.textContent = timeFmt.format(now);
+      if (dateEl) dateEl.textContent = dateFmt.format(now);
     } catch {
       timeEl.textContent = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+      if (dateEl) dateEl.textContent = new Date().toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
     }
   };
 
@@ -1050,8 +1202,8 @@ function renderClock() {
 
   ui.clock.hidden = false;
   ui.clock.innerHTML = `
-    <div class="clock__label">Местное время</div>
     <div class="clock__value">
+      <span class="clock__date" data-clock-date>—</span>
       <span class="clock__time" data-clock-time>—</span>
       <span class="clock__sep">•</span>
       <span class="clock__tz" data-clock-tz>—</span>
@@ -1099,13 +1251,11 @@ function renderCurrent() {
             .map((x) => {
               const infoH = wmoInfo(x.wmo, x.isDay);
               const tempH = Number.isFinite(x.temp) ? `${x.temp}${unitsLabel()}` : "—";
-              const popH = Number.isFinite(x.pop) && x.pop > 0 ? `<div class="hour__pop">${x.pop}%</div>` : "";
               return `
                 <div class="hour" role="listitem" title="${escapeHtml(infoH.label)}">
                   <div class="hour__time">${escapeHtml(x.time)}</div>
                   <div class="hour__icon" aria-hidden="true">${infoH.icon}</div>
                   <div class="hour__temp">${escapeHtml(tempH)}</div>
-                  ${popH}
                 </div>
               `;
             })
@@ -1130,14 +1280,14 @@ function renderCurrent() {
   ui.current.hidden = false;
   ui.current.innerHTML = `
     <div class="current__top">
-      <div>
+      <div class="card__icon current__icon" aria-hidden="true">${info.icon}</div>
+      <div class="current__main">
         <div class="current__temp">
           ${t}${unitsLabel()}
           ${tf !== null ? `<div class="current__feels">ощущается ${tf}${unitsLabel()}</div>` : ""}
         </div>
         <div class="current__desc">${escapeHtml(desc)}</div>
       </div>
-      <div class="card__icon" aria-hidden="true">${info.icon}</div>
     </div>
     <div class="current__meta" data-meta-scroll role="list" aria-label="Параметры сейчас">
       <div class="pill meta-pill" role="listitem">${iconMiniWind()} Ветер: <b>${w}</b> ${windUnit()}</div>
@@ -1322,9 +1472,13 @@ function closeDetails() {
 
 function syncTelegramBackButton() {
   const tg = getTelegram();
-  if (!tg?.BackButton) return;
-  if (ui.sheet.classList.contains("sheet--open")) tg.BackButton.show();
-  else tg.BackButton.hide();
+  if (!tg?.BackButton || !tgIsVersionAtLeast(tg, "6.1")) return;
+  try {
+    if (ui.sheet.classList.contains("sheet--open")) tg.BackButton.show();
+    else tg.BackButton.hide();
+  } catch {
+    // ignore
+  }
 }
 
 function hideSuggestions() {
@@ -1361,7 +1515,7 @@ async function useGeolocation() {
   const tg = getTelegram();
   const insideTelegram = Boolean(tg?.initData);
   const maybeNeedsTgUpdate =
-    insideTelegram && tg && typeof tg.isVersionAtLeast === "function" ? !tg.isVersionAtLeast("8.0") : false;
+    insideTelegram ? !tgIsVersionAtLeast(tg, "8.0") : false;
 
   setStatus("Запрашиваю геолокацию…");
 
@@ -1518,6 +1672,33 @@ function getTelegram() {
   return window.Telegram?.WebApp || null;
 }
 
+function parseTgVersion(v) {
+  return String(v || "")
+    .split(".")
+    .slice(0, 3)
+    .map((x) => Number(x))
+    .map((n) => (Number.isFinite(n) ? n : 0));
+}
+
+function tgIsVersionAtLeast(tg, minVersion) {
+  if (!tg) return false;
+  try {
+    if (typeof tg.isVersionAtLeast === "function") return tg.isVersionAtLeast(minVersion);
+  } catch {
+    // ignore
+  }
+
+  const cur = parseTgVersion(tg.version);
+  const min = parseTgVersion(minVersion);
+  for (let i = 0; i < 3; i++) {
+    const a = cur[i] ?? 0;
+    const b = min[i] ?? 0;
+    if (a > b) return true;
+    if (a < b) return false;
+  }
+  return true;
+}
+
 function applyTelegramTheme(tg) {
   const p = tg?.themeParams || {};
   const root = document.documentElement;
@@ -1530,7 +1711,8 @@ function applyTelegramTheme(tg) {
   if (p.button_color) root.style.setProperty("--accent", p.button_color);
   if (p.secondary_bg_color) root.style.setProperty("--card-2", p.secondary_bg_color);
 
-  if (typeof tg.setHeaderColor === "function") {
+  const supportsColors = tgIsVersionAtLeast(tg, "6.1");
+  if (supportsColors && typeof tg.setHeaderColor === "function") {
     try {
       // Prefer token values to match Telegram UI where possible.
       tg.setHeaderColor(p.bg_color ? "bg_color" : "secondary_bg_color");
@@ -1538,7 +1720,7 @@ function applyTelegramTheme(tg) {
       // ignore
     }
   }
-  if (typeof tg.setBackgroundColor === "function" && p.bg_color) {
+  if (supportsColors && typeof tg.setBackgroundColor === "function" && p.bg_color) {
     try {
       tg.setBackgroundColor(p.bg_color);
     } catch {
@@ -1561,21 +1743,48 @@ function syncTelegramMainButton() {
   tg.MainButton.color = tg.themeParams?.button_color || "#2ea6ff";
   tg.MainButton.textColor = tg.themeParams?.button_text_color || "#ffffff";
   tg.MainButton.show();
+  if (typeof tg.MainButton.enable === "function") tg.MainButton.enable();
 
   // Ensure we only have one handler.
-  if (!tg.__wxappBound) {
-    tg.__wxappBound = true;
-    tg.MainButton.onClick(() => {
+  if (!state.tgMainBound) {
+    state.tgMainBound = true;
+    const onMainClick = () => {
       try {
+        const liveTg = getTelegram();
+        if (!liveTg || typeof liveTg.sendData !== "function") {
+          throw new Error("Telegram WebApp sendData() is not available");
+        }
+
+        if (typeof liveTg.MainButton?.showProgress === "function") liveTg.MainButton.showProgress();
+        if (typeof liveTg.MainButton?.disable === "function") liveTg.MainButton.disable();
+
+        setStatus("Отправляю прогноз…");
         const payload = buildSharePayload();
-        tg.sendData(JSON.stringify(payload));
-        tg.HapticFeedback?.impactOccurred?.("light");
-        tg.showAlert?.("Готово! Данные отправлены боту.");
+        liveTg.sendData(JSON.stringify(payload));
+        liveTg.HapticFeedback?.impactOccurred?.("light");
+
+        const doneText = "Готово! Прогноз отправлен. Вернитесь в чат.";
+        if (typeof liveTg.showAlert === "function") {
+          liveTg.showAlert(doneText, () => {
+            if (typeof liveTg.close === "function") liveTg.close();
+          });
+        } else {
+          setStatus(doneText);
+          if (typeof liveTg.close === "function") setTimeout(() => liveTg.close(), 250);
+        }
       } catch (err) {
         console.error(err);
-        tg.showAlert?.("Не удалось отправить данные.");
+        setStatus("Не удалось отправить прогноз. Проверьте, что мини‑приложение открыто из Telegram.", "error");
+
+        const liveTg = getTelegram();
+        if (typeof liveTg?.MainButton?.hideProgress === "function") liveTg.MainButton.hideProgress();
+        if (typeof liveTg?.MainButton?.enable === "function") liveTg.MainButton.enable();
+        liveTg?.showAlert?.("Не удалось отправить данные.");
       }
-    });
+    };
+
+    if (typeof tg.MainButton.onClick === "function") tg.MainButton.onClick(onMainClick);
+    else tg.onEvent?.("mainButtonClicked", onMainClick);
   }
 }
 
@@ -1612,11 +1821,15 @@ function initTelegram() {
     syncTelegramMainButton();
   });
 
-  if (tg.BackButton && !tg.__wxappBackBound) {
-    tg.__wxappBackBound = true;
-    tg.BackButton.onClick(() => {
-      if (ui.sheet.classList.contains("sheet--open")) closeDetails();
-    });
+  if (tg.BackButton && !tg.__wxappBackBound && tgIsVersionAtLeast(tg, "6.1")) {
+    try {
+      tg.BackButton.onClick(() => {
+        if (ui.sheet.classList.contains("sheet--open")) closeDetails();
+      });
+      tg.__wxappBackBound = true;
+    } catch {
+      // ignore
+    }
   }
 }
 
