@@ -30,6 +30,14 @@
   --pad: clamp(14px, 4vw, 20px);
   --h1: clamp(20px, 4.8vw, 28px);
   --temp: clamp(32px, 9vw, 46px);
+
+  /* Fullscreen viewport helpers (iOS/Telegram/WebView quirks). */
+  --app-height: 100vh;
+  --app-height: 100dvh;
+  --safe-top: var(--tg-safe-area-inset-top, env(safe-area-inset-top));
+  --safe-right: var(--tg-safe-area-inset-right, env(safe-area-inset-right));
+  --safe-bottom: var(--tg-safe-area-inset-bottom, env(safe-area-inset-bottom));
+  --safe-left: var(--tg-safe-area-inset-left, env(safe-area-inset-left));
 }
 
 @media (prefers-color-scheme: light) {
@@ -78,6 +86,7 @@ body {
 html {
   overflow-x: hidden;
   overflow-x: clip;
+  background: var(--bg);
 }
 
 body {
@@ -86,6 +95,7 @@ body {
     "Segoe UI Emoji";
   color: var(--fg);
   background: var(--bg);
+  min-height: var(--app-height);
   overflow-x: hidden;
   overflow-x: clip;
   overscroll-behavior-x: none;
@@ -93,7 +103,10 @@ body {
 
 .bg {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: var(--app-height);
   overflow: hidden;
   background-image:
     var(--bg-art),
@@ -131,7 +144,8 @@ body {
   max-width: 720px;
   margin: 0 auto;
   width: 100%;
-  padding: calc(env(safe-area-inset-top) + 18px) var(--pad) calc(env(safe-area-inset-bottom) + 20px);
+  padding: calc(var(--safe-top) + 18px) calc(var(--safe-right) + var(--pad)) calc(var(--safe-bottom) + 20px)
+    calc(var(--safe-left) + var(--pad));
   display: grid;
   gap: clamp(14px, 2.6vw, 20px);
 }
@@ -862,7 +876,10 @@ body {
 
 .sheet-backdrop {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: var(--app-height);
   background: rgba(0, 0, 0, 0.55);
   backdrop-filter: blur(10px);
 }
@@ -884,7 +901,7 @@ body {
   box-shadow: 0 -18px 50px rgba(0, 0, 0, 0.55);
   transform: translateY(110%);
   transition: transform 220ms ease;
-  padding-bottom: calc(env(safe-area-inset-bottom) + 14px);
+  padding-bottom: calc(var(--safe-bottom) + 14px);
   display: flex;
   flex-direction: column;
   overflow: hidden;

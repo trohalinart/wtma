@@ -35,6 +35,47 @@ const ui = {
 
 const storageKey = "wxapp:v1";
 
+// --- fullscreen viewport sync (mobile Safari / Telegram WebView quirks) ---
+
+function viewportHeightPx() {
+  // Prefer Telegram-provided viewport sizes when available (more stable on mobile WebViews).
+  try {
+    const tg = getTelegram();
+    const tgH = Number(tg?.viewportStableHeight ?? tg?.viewportHeight);
+    if (Number.isFinite(tgH) && tgH > 0) return Math.round(tgH);
+  } catch {
+    // ignore
+  }
+
+  const vv = window.visualViewport;
+  const h = Number(vv?.height ?? window.innerHeight);
+  if (!Number.isFinite(h) || h <= 0) return null;
+  return Math.round(h);
+}
+
+function syncAppViewport() {
+  const h = viewportHeightPx();
+  if (!h) return;
+  document.documentElement.style.setProperty("--app-height", `${h}px`);
+}
+
+let viewportSyncRaf = 0;
+function scheduleViewportSync() {
+  if (viewportSyncRaf) return;
+  viewportSyncRaf = requestAnimationFrame(() => {
+    viewportSyncRaf = 0;
+    syncAppViewport();
+  });
+}
+
+function initViewportSync() {
+  scheduleViewportSync();
+  window.addEventListener("resize", scheduleViewportSync, { passive: true });
+  window.visualViewport?.addEventListener("resize", scheduleViewportSync, { passive: true });
+  // iOS: toolbar show/hide affects visual viewport without a window resize.
+  window.visualViewport?.addEventListener("scroll", scheduleViewportSync, { passive: true });
+}
+
 function counterSafeName(text, { fallback = "x" } = {}) {
   const s = String(text || "")
     .toLowerCase()
@@ -1907,12 +1948,14 @@ function initTelegram() {
   if (!tg) return;
   tg.ready();
   tg.expand?.();
+  scheduleViewportSync();
   applyTelegramTheme(tg);
   tg.onEvent?.("themeChanged", () => {
     applyTelegramTheme(tg);
     applyTheme();
     syncTelegramMainButton();
   });
+  tg.onEvent?.("viewportChanged", scheduleViewportSync);
 
   if (tg.BackButton && !tg.__wxappBackBound && tgIsVersionAtLeast(tg, "6.1")) {
     try {
@@ -1929,6 +1972,7 @@ function initTelegram() {
 // --- wire up ---
 
 function init() {
+  initViewportSync();
   loadPrefs();
   initTheme();
   initTelegram();
