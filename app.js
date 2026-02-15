@@ -383,7 +383,7 @@ function wmoInfo(code, isDay = true) {
 
   if (c === 0) return { label: "Ясно", icon: isDay ? iconSunLegacy() : iconMoon() };
   if (c === 1) return { label: "Малооблачно", icon: isDay ? iconPartlyCloudyLegacy() : iconNightCloudy() };
-  if (c === 2) return { label: "Переменная облачность", icon: iconPartlyCloudySvg() };
+  if (c === 2) return { label: "Переменная облачность", icon: isDay ? iconPartlyCloudySvg() : iconPartlyCloudyNightSvg() };
   if (c === 3) return { label: "Пасмурно", icon: iconCloudLegacy() };
   if ([45, 48].includes(c)) return { label: "Туман", icon: iconFog() };
   if (c >= 51 && c <= 57) return { label: "Морось", icon: iconRainLegacy() };
@@ -652,6 +652,10 @@ function iconPartlyCloudyLegacy() {
 
 function iconPartlyCloudySvg() {
   return iconSvg("./images/partly_cloudy.svg", "Переменная облачность");
+}
+
+function iconPartlyCloudyNightSvg() {
+  return iconSvg("./images/cloudy_moon.svg", "Переменная облачность ночью");
 }
 
 
