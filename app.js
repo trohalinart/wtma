@@ -4,7 +4,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 
 const state = {
   units: "metric", // metric | imperial
-  theme: "auto", // auto | light | dark
+  theme: "dark", // fixed app theme
   location: null, // { name, admin1, country, latitude, longitude, timezone? }
   forecast: null, // api payload
   aborter: null,
@@ -181,7 +181,6 @@ function loadPrefs() {
     if (!raw) return;
     const data = JSON.parse(raw);
     if (data?.units === "metric" || data?.units === "imperial") state.units = data.units;
-    if (data?.theme === "auto" || data?.theme === "light" || data?.theme === "dark") state.theme = data.theme;
     if (data?.location && typeof data.location === "object") state.location = data.location;
   } catch {
     // ignore
@@ -213,21 +212,8 @@ function clearInlineThemeVars() {
   for (const k of themeVars) root.style.removeProperty(k);
 }
 
-function getSystemTheme() {
-  const tg = getTelegram();
-  const scheme = tg?.colorScheme;
-  if (scheme === "light" || scheme === "dark") return scheme;
-
-  try {
-    return window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
-  } catch {
-    return "dark";
-  }
-}
-
 function getEffectiveTheme() {
-  if (state.theme === "light" || state.theme === "dark") return state.theme;
-  return getSystemTheme();
+  return state.theme === "light" ? "light" : "dark";
 }
 
 function syncThemeButton() {
@@ -247,16 +233,13 @@ function syncThemeButton() {
 
 function applyTheme() {
   const root = document.documentElement;
+  const effective = getEffectiveTheme();
 
-  if (state.theme === "light" || state.theme === "dark") {
-    root.dataset.theme = state.theme;
-    clearInlineThemeVars();
-  } else {
-    delete root.dataset.theme;
-  }
+  root.dataset.theme = effective;
+  clearInlineThemeVars();
 
   try {
-    root.style.colorScheme = getEffectiveTheme();
+    root.style.colorScheme = effective;
   } catch {
     // ignore
   }
@@ -280,17 +263,6 @@ function toggleTheme() {
 
 function initTheme() {
   applyTheme();
-
-  // Keep the icon in sync in browsers (auto mode only).
-  try {
-    const mql = window.matchMedia?.("(prefers-color-scheme: light)");
-    if (!mql) return;
-    const onChange = () => state.theme === "auto" && applyTheme();
-    if (typeof mql.addEventListener === "function") mql.addEventListener("change", onChange);
-    else if (typeof mql.addListener === "function") mql.addListener(onChange);
-  } catch {
-    // ignore
-  }
 }
 
 function getRecent() {
@@ -753,28 +725,21 @@ function applyBackgroundMotionPreference(mql) {
 
 function initBackgroundInteraction() {
   if (!ui.bg) return;
-
-  const mql = window.matchMedia?.("(prefers-reduced-motion: reduce)");
-  const syncPreference = () => applyBackgroundMotionPreference(mql);
-
-  syncPreference();
-
-  if (typeof mql?.addEventListener === "function") mql.addEventListener("change", syncPreference);
-  else if (typeof mql?.addListener === "function") mql.addListener(syncPreference);
-
-  window.addEventListener("pointermove", onBackgroundPointerMove, { passive: true });
-  window.addEventListener("pointerdown", onBackgroundPointerMove, { passive: true });
-  window.addEventListener("touchstart", onBackgroundTouchMove, { passive: true });
-  window.addEventListener("touchmove", onBackgroundTouchMove, { passive: true });
-  window.addEventListener("touchend", () => scheduleBackgroundMotionReset(), { passive: true });
-  window.addEventListener("touchcancel", () => resetBackgroundMotion({ immediate: true }), { passive: true });
-  window.addEventListener("blur", () => resetBackgroundMotion());
-  document.addEventListener("visibilitychange", () => {
-    if (document.hidden) resetBackgroundMotion({ immediate: true });
-  });
-  document.addEventListener("mouseout", (event) => {
-    if (!event.relatedTarget) resetBackgroundMotion();
-  });
+  bgMotion.reduceMotion = true;
+  if (bgMotion.raf) {
+    cancelAnimationFrame(bgMotion.raf);
+    bgMotion.raf = 0;
+  }
+  if (bgMotion.resetTimer) {
+    window.clearTimeout(bgMotion.resetTimer);
+    bgMotion.resetTimer = 0;
+  }
+  bgMotion.targetX = 0.5;
+  bgMotion.targetY = 0.28;
+  bgMotion.currentX = 0.5;
+  bgMotion.currentY = 0.28;
+  ui.bg.dataset.motion = "static";
+  writeBackgroundMotion(bgMotion.currentX, bgMotion.currentY);
 }
 
 function setWxScene(scene, { bright = false, phase = "night" } = {}) {
@@ -2184,34 +2149,7 @@ function tgIsVersionAtLeast(tg, minVersion) {
 }
 
 function applyTelegramTheme(tg) {
-  if (state.theme !== "auto") return;
-  const p = tg?.themeParams || {};
-  const root = document.documentElement;
-
-  // Telegram supplies hex colors; use them as hints, but keep contrast.
-  if (p.bg_color) root.style.setProperty("--bg", p.bg_color);
-  if (p.text_color) root.style.setProperty("--fg", p.text_color);
-  if (p.hint_color) root.style.setProperty("--muted", p.hint_color);
-  if (p.secondary_bg_color) root.style.setProperty("--card", p.secondary_bg_color);
-  if (p.button_color) root.style.setProperty("--accent", p.button_color);
-  if (p.secondary_bg_color) root.style.setProperty("--card-2", p.secondary_bg_color);
-
-  const supportsColors = tgIsVersionAtLeast(tg, "6.1");
-  if (supportsColors && typeof tg.setHeaderColor === "function") {
-    try {
-      // Prefer token values to match Telegram UI where possible.
-      tg.setHeaderColor(p.bg_color ? "bg_color" : "secondary_bg_color");
-    } catch {
-      // ignore
-    }
-  }
-  if (supportsColors && typeof tg.setBackgroundColor === "function" && p.bg_color) {
-    try {
-      tg.setBackgroundColor(p.bg_color);
-    } catch {
-      // ignore
-    }
-  }
+  void tg;
 }
 
 function syncTelegramMainButton() {
@@ -2335,7 +2273,6 @@ function init() {
 
   ui.btnUnits.addEventListener("click", toggleUnits);
   ui.btnGeo.addEventListener("click", useGeolocation);
-  ui.btnTheme?.addEventListener("click", toggleTheme);
   ui.btnRefresh.addEventListener("click", () => state.location && loadForecast(state.location, { reason: "refresh" }));
   ui.btnClear.addEventListener("click", () => {
     ui.cityInput.value = "";
