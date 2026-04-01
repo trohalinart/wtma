@@ -59,7 +59,6 @@
       <div class="bg__layer bg__layer--glow"></div>
       <div class="bg__layer bg__layer--fx"></div>
       <div class="bg__layer bg__layer--shade"></div>
-      <div id="bgRain" class="bg__rain" aria-hidden="true"></div>
     </div>
 
     <div class="app">

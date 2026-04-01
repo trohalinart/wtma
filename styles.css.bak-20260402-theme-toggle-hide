@@ -423,7 +423,6 @@ body {
 }
 
 .btn--theme {
-  display: none;
   font-size: 18px;
   line-height: 1;
 }

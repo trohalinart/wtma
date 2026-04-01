@@ -14,7 +14,6 @@ const state = {
 
 const ui = {
   bg: $("#bg"),
-  bgRain: $("#bgRain"),
   subtitle: $("#subtitle"),
   userCount: $("#userCount"),
   btnGeo: $("#btnGeo"),
@@ -403,7 +402,6 @@ function wmoInfo(code, isDay = true) {
 
 let lastWxScene = null;
 let lastWxBright = false;
-let lastWxPhase = null;
 let bgFadeTimer = null;
 let currentClockTimeout = null;
 let currentClockInterval = null;
@@ -417,216 +415,11 @@ const bgMotion = {
   reduceMotion: false,
 };
 
-function parseIsoLocalParts(value) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2}))?)?/.exec(String(value || ""));
-  if (!match) return null;
-
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const hour = Number(match[4] || 0);
-  const minute = Number(match[5] || 0);
-  const second = Number(match[6] || 0);
-
-  if (![year, month, day, hour, minute, second].every(Number.isFinite)) return null;
-  return { year, month, day, hour, minute, second };
-}
-
-function pad2(n) {
-  return String(n).padStart(2, "0");
-}
-
-function formatIsoDate(parts) {
-  if (!parts) return "";
-  return `${parts.year}-${pad2(parts.month)}-${pad2(parts.day)}`;
-}
-
-function minutesFromIsoLocal(value) {
-  const parts = parseIsoLocalParts(value);
-  if (!parts) return null;
-  return parts.hour * 60 + parts.minute + parts.second / 60;
-}
-
-function getForecastNowParts() {
-  const offsetSeconds = Number(state.forecast?.utc_offset_seconds);
-  if (Number.isFinite(offsetSeconds)) {
-    const d = new Date(Date.now() + offsetSeconds * 1000);
-    return {
-      year: d.getUTCFullYear(),
-      month: d.getUTCMonth() + 1,
-      day: d.getUTCDate(),
-      hour: d.getUTCHours(),
-      minute: d.getUTCMinutes(),
-      second: d.getUTCSeconds(),
-      dateISO: `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`,
-      minutes: d.getUTCHours() * 60 + d.getUTCMinutes() + d.getUTCSeconds() / 60,
-    };
-  }
-
-  const tz = String(state.forecast?.timezone || state.location?.timezone || "").trim();
-  if (tz) {
-    try {
-      const fmt = new Intl.DateTimeFormat("en-CA", {
-        timeZone: tz,
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hourCycle: "h23",
-      });
-      const parts = {};
-      for (const part of fmt.formatToParts(new Date())) {
-        if (part.type !== "literal") parts[part.type] = part.value;
-      }
-      const year = Number(parts.year);
-      const month = Number(parts.month);
-      const day = Number(parts.day);
-      const hour = Number(parts.hour);
-      const minute = Number(parts.minute);
-      const second = Number(parts.second);
-      if ([year, month, day, hour, minute, second].every(Number.isFinite)) {
-        return {
-          year,
-          month,
-          day,
-          hour,
-          minute,
-          second,
-          dateISO: `${year}-${pad2(month)}-${pad2(day)}`,
-          minutes: hour * 60 + minute + second / 60,
-        };
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  const currentParts = parseIsoLocalParts(state.forecast?.current?.time);
-  if (currentParts) {
-    return {
-      ...currentParts,
-      dateISO: formatIsoDate(currentParts),
-      minutes: currentParts.hour * 60 + currentParts.minute + currentParts.second / 60,
-    };
-  }
-
-  const d = new Date();
-  return {
-    year: d.getFullYear(),
-    month: d.getMonth() + 1,
-    day: d.getDate(),
-    hour: d.getHours(),
-    minute: d.getMinutes(),
-    second: d.getSeconds(),
-    dateISO: `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`,
-    minutes: d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60,
-  };
-}
-
-function getWeatherTimingState(current = state.forecast?.current) {
-  const daily = state.forecast?.daily;
-  const time = Array.isArray(daily?.time) ? daily.time : [];
-  const fallbackIsDay = Boolean(current?.is_day);
-  const nowParts = getForecastNowParts();
-  const nowDateISO = nowParts?.dateISO || String(current?.time || "").slice(0, 10);
-  const idx = nowDateISO ? time.indexOf(nowDateISO) : -1;
-
-  if (idx < 0) {
-    return {
-      phase: fallbackIsDay ? "day" : "night",
-      isDaylight: fallbackIsDay,
-      nowDateISO,
-      nowMinutes: Number.isFinite(nowParts?.minutes) ? nowParts.minutes : null,
-      sunriseMinutes: null,
-      sunsetMinutes: null,
-    };
-  }
-
-  const sunriseMinutes = minutesFromIsoLocal(daily.sunrise?.[idx]);
-  const sunsetMinutes = minutesFromIsoLocal(daily.sunset?.[idx]);
-  const nowMinutes = Number.isFinite(nowParts?.minutes) ? nowParts.minutes : minutesFromIsoLocal(current?.time);
-
-  if (!Number.isFinite(nowMinutes) || !Number.isFinite(sunriseMinutes) || !Number.isFinite(sunsetMinutes) || sunriseMinutes >= sunsetMinutes) {
-    return {
-      phase: fallbackIsDay ? "day" : "night",
-      isDaylight: fallbackIsDay,
-      nowDateISO,
-      nowMinutes,
-      sunriseMinutes,
-      sunsetMinutes,
-    };
-  }
-
-  const dawnStart = Math.max(0, sunriseMinutes - 60);
-  const dawnEnd = Math.min(24 * 60, sunriseMinutes + 75);
-  const duskStart = Math.max(dawnEnd, sunsetMinutes - 75);
-  const duskEnd = Math.min(24 * 60, sunsetMinutes + 60);
-
-  let phase = "night";
-  if (nowMinutes < dawnStart || nowMinutes >= duskEnd) phase = "night";
-  else if (nowMinutes < dawnEnd) phase = "dawn";
-  else if (nowMinutes < duskStart) phase = "day";
-  else phase = "dusk";
-
-  return {
-    phase,
-    isDaylight: nowMinutes >= sunriseMinutes && nowMinutes < sunsetMinutes,
-    nowDateISO,
-    nowMinutes,
-    sunriseMinutes,
-    sunsetMinutes,
-  };
-}
-
-function isWetWeatherScene(scene) {
-  return scene === "rain" || scene === "thunder";
-}
-
-function rainPattern(seed, factor = 1, offset = 0) {
-  const raw = Math.sin(seed * factor + offset) * 43758.5453123;
-  return raw - Math.floor(raw);
-}
-
-function buildBackgroundRainMarkup(count = 44) {
-  return Array.from({ length: count }, (_, i) => {
-    const x = (rainPattern(i + 1, 12.73, 0.2) * 104 - 2).toFixed(2);
-    const delay = (rainPattern(i + 1, 7.13, 0.5) * -2.8).toFixed(2);
-    const duration = (0.74 + rainPattern(i + 1, 3.91, 0.8) * 0.78).toFixed(2);
-    const length = Math.round(26 + rainPattern(i + 1, 9.17, 0.3) * 36);
-    const drift = `${(-10 + rainPattern(i + 1, 5.57, 1.1) * 24).toFixed(2)}px`;
-    const opacity = (0.26 + rainPattern(i + 1, 4.61, 0.6) * 0.52).toFixed(2);
-    const blur = `${(rainPattern(i + 1, 8.77, 0.4) * 0.8).toFixed(2)}px`;
-    const width = `${(1 + rainPattern(i + 1, 6.31, 1.7) * 1.35).toFixed(2)}px`;
-    const near = i % 5 === 0 ? " bg__rain-drop--near" : "";
-
-    return `<span class="bg__rain-drop${near}" style="--x:${x}%; --delay:${delay}s; --duration:${duration}s; --length:${length}px; --drift:${drift}; --drop-opacity:${opacity}; --drop-blur:${blur}; --drop-width:${width};"></span>`;
-  }).join("");
-}
-
-function ensureRainEffects() {
-  if (!ui.bgRain || ui.bgRain.dataset.ready === "1") return;
-  ui.bgRain.innerHTML = buildBackgroundRainMarkup();
-  ui.bgRain.dataset.ready = "1";
-}
-
-function syncRainEffects(scene) {
-  ensureRainEffects();
-  if (!ui.bgRain) return;
-
-  const wet = isWetWeatherScene(scene);
-  ui.bgRain.hidden = !wet;
-  ui.bgRain.dataset.active = wet ? "1" : "0";
-  ui.bgRain.dataset.storm = scene === "thunder" ? "1" : "0";
-}
-
-function wxSceneFromWmo(code, phase = "day") {
+function wxSceneFromWmo(code, isDay) {
   const c = Number(code);
-  const lightPhase = phase !== "night";
 
-  if (c === 0) return lightPhase ? "clear-day" : "clear-night";
-  if (c === 1) return lightPhase ? "clear-day" : "clear-night";
+  if (c === 0) return isDay ? "clear-day" : "clear-night";
+  if (c === 1) return isDay ? "clear-day" : "clear-night";
   if (c === 2) return "cloudy";
   if (c === 3) return "cloudy";
   if ([45, 48].includes(c)) return "fog";
@@ -634,11 +427,12 @@ function wxSceneFromWmo(code, phase = "day") {
   if ((c >= 71 && c <= 77) || (c >= 85 && c <= 86)) return "snow";
   if (c >= 95 && c <= 99) return "thunder";
 
-  return lightPhase ? "cloudy" : "clear-night";
+  return isDay ? "cloudy" : "clear-night";
 }
 
 function wxSceneFromCurrent(current) {
-  return wxSceneFromWmo(current?.weather_code, getWeatherTimingState(current).phase);
+  const isDay = Boolean(current?.is_day);
+  return wxSceneFromWmo(current?.weather_code, isDay);
 }
 
 function writeBackgroundMotion(x, y) {
@@ -777,44 +571,35 @@ function initBackgroundInteraction() {
   });
 }
 
-function setWxScene(scene, { bright = false, phase = "night" } = {}) {
+function setWxScene(scene, { bright = false } = {}) {
   const nextBright = Boolean(bright);
-  const nextPhase = phase || "night";
   if (!scene) {
     lastWxScene = null;
     lastWxBright = false;
-    lastWxPhase = null;
     delete document.documentElement.dataset.wx;
     delete document.documentElement.dataset.wxBright;
-    delete document.documentElement.dataset.wxPhase;
     if (ui.bg) {
       delete ui.bg.dataset.scene;
       delete ui.bg.dataset.wxBright;
-      delete ui.bg.dataset.phase;
     }
-    syncRainEffects(null);
     return;
   }
 
-  if (scene === lastWxScene && nextBright === lastWxBright && nextPhase === lastWxPhase) return;
+  if (scene === lastWxScene && nextBright === lastWxBright) return;
   lastWxScene = scene;
   lastWxBright = nextBright;
-  lastWxPhase = nextPhase;
   document.documentElement.dataset.wx = scene;
   if (nextBright) document.documentElement.dataset.wxBright = "1";
   else delete document.documentElement.dataset.wxBright;
-  document.documentElement.dataset.wxPhase = nextPhase;
 
   if (ui.bg) {
     ui.bg.dataset.scene = scene;
     if (nextBright) ui.bg.dataset.wxBright = "1";
     else delete ui.bg.dataset.wxBright;
-    ui.bg.dataset.phase = nextPhase;
     if (bgFadeTimer) window.clearTimeout(bgFadeTimer);
     ui.bg.classList.add("bg--fade");
     bgFadeTimer = window.setTimeout(() => ui.bg && ui.bg.classList.remove("bg--fade"), 240);
   }
-  syncRainEffects(scene);
 }
 
 function applyWeatherBackground() {
@@ -824,11 +609,10 @@ function applyWeatherBackground() {
     return;
   }
 
-  const timing = getWeatherTimingState(current);
+  const isDay = Boolean(current?.is_day);
   const code = Number(current?.weather_code);
-  const phase = timing.phase;
-  const bright = phase === "day" && code === 0;
-  setWxScene(wxSceneFromWmo(current?.weather_code, phase), { bright, phase });
+  const bright = isDay && code === 0;
+  setWxScene(wxSceneFromCurrent(current), { bright });
 }
 
 function getTelegramLocationManager() {
@@ -1625,7 +1409,6 @@ function startCurrentClock({ timeZone, timeZoneAbbr, utcOffsetSeconds } = {}) {
         const now = new Date();
         timeEl.textContent = timeFmt.format(now);
         if (dateEl) dateEl.textContent = dateFmt.format(now);
-        if (!ui.sheet?.classList.contains("sheet--open")) applyWeatherBackground();
         return;
       }
 
@@ -1641,18 +1424,15 @@ function startCurrentClock({ timeZone, timeZoneAbbr, utcOffsetSeconds } = {}) {
           const yyyy = String(d.getUTCFullYear());
           dateEl.textContent = `${dd}.${mo}.${yyyy}`;
         }
-        if (!ui.sheet?.classList.contains("sheet--open")) applyWeatherBackground();
         return;
       }
 
       const now = new Date();
       timeEl.textContent = timeFmt.format(now);
       if (dateEl) dateEl.textContent = dateFmt.format(now);
-      if (!ui.sheet?.classList.contains("sheet--open")) applyWeatherBackground();
     } catch {
       timeEl.textContent = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
       if (dateEl) dateEl.textContent = new Date().toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
-      if (!ui.sheet?.classList.contains("sheet--open")) applyWeatherBackground();
     }
   };
 
@@ -1703,14 +1483,11 @@ function renderCurrent() {
     }
     ui.current.hidden = true;
     ui.current.innerHTML = "";
-    ui.current.classList.remove("current--wet", "current--storm");
-    delete ui.current.dataset.scene;
     return;
   }
 
   const isDay = Boolean(cur.is_day);
   const info = wmoInfo(cur.weather_code, isDay);
-  const currentScene = wxSceneFromCurrent(cur);
   const t = Math.round(cur.temperature_2m);
   const feels = Number(cur.apparent_temperature);
   const tf = Number.isFinite(feels) ? Math.round(feels) : null;
@@ -1757,29 +1534,25 @@ function renderCurrent() {
     : "";
 
   ui.current.hidden = false;
-  ui.current.classList.remove("current--wet", "current--storm");
-  ui.current.dataset.scene = currentScene;
   ui.current.innerHTML = `
-    <div class="current__content">
-      <div class="current__top">
-        <div class="card__icon current__icon" aria-hidden="true">${info.icon}</div>
-        <div class="current__main">
-          <div class="current__temp">
-            ${t}${unitsLabel()}
-            ${tf !== null ? `<div class="current__feels">ощущается ${tf}${unitsLabel()}</div>` : ""}
-          </div>
-          <div class="current__desc">${escapeHtml(desc)}</div>
+    <div class="current__top">
+      <div class="card__icon current__icon" aria-hidden="true">${info.icon}</div>
+      <div class="current__main">
+        <div class="current__temp">
+          ${t}${unitsLabel()}
+          ${tf !== null ? `<div class="current__feels">ощущается ${tf}${unitsLabel()}</div>` : ""}
         </div>
+        <div class="current__desc">${escapeHtml(desc)}</div>
       </div>
-      <div class="current__meta" data-meta-scroll role="list" aria-label="Параметры сейчас">
-        <div class="pill meta-pill" role="listitem">${iconMiniWind()} Ветер: <b>${w}</b> ${windUnit()}</div>
-        ${h !== null ? `<div class="pill meta-pill" role="listitem">${iconMiniDrop()} Влажность: <b>${h}</b>%</div>` : ""}
-        ${p !== null ? `<div class="pill meta-pill" role="listitem">${iconMiniPressure()} Давление: <b>${escapeHtml(p)}</b> ${pressureUnit()}</div>` : ""}
-        <div class="pill meta-pill" role="listitem">${iconMiniUnits()} Единицы: <b>${state.units === "metric" ? "метрические" : "имперские"}</b></div>
-      </div>
-      ${hourlyHtml}
-      ${tipsHtml}
     </div>
+    <div class="current__meta" data-meta-scroll role="list" aria-label="Параметры сейчас">
+      <div class="pill meta-pill" role="listitem">${iconMiniWind()} Ветер: <b>${w}</b> ${windUnit()}</div>
+      ${h !== null ? `<div class="pill meta-pill" role="listitem">${iconMiniDrop()} Влажность: <b>${h}</b>%</div>` : ""}
+      ${p !== null ? `<div class="pill meta-pill" role="listitem">${iconMiniPressure()} Давление: <b>${escapeHtml(p)}</b> ${pressureUnit()}</div>` : ""}
+      <div class="pill meta-pill" role="listitem">${iconMiniUnits()} Единицы: <b>${state.units === "metric" ? "метрические" : "имперские"}</b></div>
+    </div>
+    ${hourlyHtml}
+    ${tipsHtml}
   `;
 
   const scroller = ui.current.querySelector("[data-hourly-scroll]");
@@ -1858,8 +1631,7 @@ function openDetails(idx) {
   if (!dateISO) return;
 
   const wmo = Number(daily.weather_code?.[idx]);
-  const phase = getWeatherTimingState(state.forecast?.current).phase;
-  setWxScene(wxSceneFromWmo(wmo, phase), { bright: wmo === 0 && phase === "day", phase });
+  setWxScene(wxSceneFromWmo(wmo, true), { bright: wmo === 0 });
 
   const info = wmoInfo(wmo, true);
   const { w, dm } = dayLabel(dateISO);
@@ -2328,7 +2100,6 @@ function init() {
   loadPrefs();
   initTheme();
   initBackgroundInteraction();
-  ensureRainEffects();
   initTelegram();
   syncTelegramBackButton();
   syncUserCount();

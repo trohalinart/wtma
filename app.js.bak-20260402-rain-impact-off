@@ -605,6 +605,21 @@ function buildBackgroundRainMarkup(count = 44) {
   }).join("");
 }
 
+function buildCurrentRainMarkup(scene) {
+  const count = scene === "thunder" ? 11 : 9;
+  const impacts = Array.from({ length: count }, (_, i) => {
+    const x = (8 + rainPattern(i + 1, 10.17, 0.2) * 84).toFixed(2);
+    const delay = (rainPattern(i + 1, 3.77, 0.5) * -2.6).toFixed(2);
+    const duration = (1.55 + rainPattern(i + 1, 8.23, 0.9) * 1.1).toFixed(2);
+    const fall = Math.round(16 + rainPattern(i + 1, 5.09, 1.4) * 26);
+    const splash = Math.round(10 + rainPattern(i + 1, 6.79, 0.1) * 12);
+    const tilt = `${(-4 + rainPattern(i + 1, 7.81, 0.3) * 10).toFixed(2)}deg`;
+    return `<span class="current-rain__impact" style="--x:${x}%; --delay:${delay}s; --duration:${duration}s; --fall:${fall}px; --splash:${splash}px; --tilt:${tilt};"></span>`;
+  }).join("");
+
+  return `<div class="current__fx current__fx--rain" aria-hidden="true">${impacts}</div>`;
+}
+
 function ensureRainEffects() {
   if (!ui.bgRain || ui.bgRain.dataset.ready === "1") return;
   ui.bgRain.innerHTML = buildBackgroundRainMarkup();
@@ -1711,6 +1726,7 @@ function renderCurrent() {
   const isDay = Boolean(cur.is_day);
   const info = wmoInfo(cur.weather_code, isDay);
   const currentScene = wxSceneFromCurrent(cur);
+  const isWetScene = isWetWeatherScene(currentScene);
   const t = Math.round(cur.temperature_2m);
   const feels = Number(cur.apparent_temperature);
   const tf = Number.isFinite(feels) ? Math.round(feels) : null;
@@ -1757,9 +1773,11 @@ function renderCurrent() {
     : "";
 
   ui.current.hidden = false;
-  ui.current.classList.remove("current--wet", "current--storm");
+  ui.current.classList.toggle("current--wet", isWetScene);
+  ui.current.classList.toggle("current--storm", currentScene === "thunder");
   ui.current.dataset.scene = currentScene;
   ui.current.innerHTML = `
+    ${isWetScene ? buildCurrentRainMarkup(currentScene) : ""}
     <div class="current__content">
       <div class="current__top">
         <div class="card__icon current__icon" aria-hidden="true">${info.icon}</div>

@@ -51,16 +51,7 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div id="bg" class="bg" aria-hidden="true">
-      <div class="bg__layer bg__layer--base"></div>
-      <div class="bg__layer bg__layer--aurora"></div>
-      <div class="bg__layer bg__layer--art"></div>
-      <div class="bg__layer bg__layer--mesh"></div>
-      <div class="bg__layer bg__layer--glow"></div>
-      <div class="bg__layer bg__layer--fx"></div>
-      <div class="bg__layer bg__layer--shade"></div>
-      <div id="bgRain" class="bg__rain" aria-hidden="true"></div>
-    </div>
+    <div id="bg" class="bg" aria-hidden="true"></div>
 
     <div class="app">
       <header class="topbar">
