@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# Env files
+.env
+bot/.env
+
+# OS / editors
+Thumbs.db
+.DS_Store
+.vscode/
+
+# Temporary (agent/debug)
+tmp_codepen_*
+tmp_extracted_icons*
+tmp_icons_snippet*
+
+# Local backups
+*.bak-*
+
+# Bot runtime data
+bot/admin_state.json
+bot/seen_users.json
+bot/user_ids.jsonl

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#0b1020" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#f7f9ff" media="(prefers-color-scheme: light)" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Погода" />
+    <meta
+      name="description"
+      content="Инструкция: как установить «Погода на 7 дней» на телефон из браузера (iPhone/iPad и Android)."
+    />
+    <meta name="robots" content="index,follow" />
+    <link rel="canonical" href="https://wtma.ru/install/" />
+
+    <title>Как установить на телефон — Погода</title>
+    <link rel="icon" href="../favicon/favicon.ico" sizes="any" />
+    <link rel="icon" href="../favicon/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="../favicon/favicon-32x32.png" type="image/png" sizes="32x32" />
+    <link rel="icon" href="../favicon/favicon-16x16.png" type="image/png" sizes="16x16" />
+    <link rel="apple-touch-icon" href="../favicon/apple-touch-icon.png" sizes="180x180" />
+    <link rel="manifest" href="../favicon/site.webmanifest" />
+    <link rel="stylesheet" href="../styles.css" />
+
+    <style>
+      a.btn {
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .guide {
+        display: grid;
+        gap: clamp(14px, 2.6vw, 20px);
+      }
+      .panel {
+        border: 1px solid var(--border);
+        background: var(--card);
+        border-radius: var(--radius);
+        padding: 14px 14px;
+        box-shadow: var(--shadow);
+      }
+      .panel h2 {
+        margin: 0 0 10px;
+        font-size: 16px;
+        letter-spacing: 0.2px;
+      }
+      .panel ol {
+        margin: 0;
+        padding-left: 18px;
+        line-height: 1.5;
+      }
+      .panel li {
+        margin: 6px 0;
+      }
+      code {
+        border: 1px solid var(--border);
+        background: rgba(255, 255, 255, 0.06);
+        border-radius: 10px;
+        padding: 1px 6px;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="bg" class="bg bg--fade" aria-hidden="true"></div>
+
+    <div class="app">
+      <header class="topbar">
+        <div class="topbar__title">
+          <h1>Установка на телефон</h1>
+          <p class="subtitle">Добавьте «Погоду» на главный экран — будет открываться как приложение.</p>
+        </div>
+        <div class="topbar__actions">
+          <a class="btn btn--pill" href="../" aria-label="Открыть приложение">Открыть</a>
+        </div>
+      </header>
+
+      <main class="guide">
+        <section class="panel" aria-label="Инструкция для iPhone и iPad">
+          <h2>iPhone / iPad (Safari)</h2>
+          <ol>
+            <li>Откройте сайт приложения в <b>Safari</b> (не во встроенном браузере Telegram/Instagram и т. п.).</li>
+            <li>Нажмите <b>Поделиться</b> (квадрат со стрелкой вверх).</li>
+            <li>Выберите <b>На экран «Домой»</b> / <b>Add to Home Screen</b>.</li>
+            <li>Подтвердите добавление.</li>
+          </ol>
+        </section>
+
+        <section class="panel" aria-label="Инструкция для Android">
+          <h2>Android (Chrome / Edge)</h2>
+          <ol>
+            <li>Откройте сайт приложения в <b>Chrome</b> (или <b>Edge</b>).</li>
+            <li>Нажмите меню <b>⋮</b> → <b>Установить приложение</b> (или <b>Добавить на главный экран</b>).</li>
+            <li>Подтвердите.</li>
+          </ol>
+        </section>
+
+        <div class="tip" role="note">
+          Если пункта “Установить” нет — обновите страницу, убедитесь что адрес начинается с <code>https://</code>, и
+          попробуйте открыть сайт именно в системном браузере (не во встроенном).
+        </div>
+      </main>
+    </div>
+
+    <script type="module" src="../pwa.js"></script>
+  </body>
+</html>

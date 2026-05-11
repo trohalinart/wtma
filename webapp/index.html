@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="ru" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0b1020" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Погода" />
+    <meta
+      name="description"
+      content="Прогноз погоды на 7 дней: поиск города, геолокация, подробности по дням (осадки, ветер, восход/закат)."
+    />
+    <meta name="robots" content="index,follow" />
+    <link rel="canonical" href="https://wtma.ru/" />
+
+    <meta property="og:title" content="Погода на 7 дней" />
+    <meta
+      property="og:description"
+      content="Удобный прогноз погоды на 7 дней: поиск города, геолокация и подробности по каждому дню."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://wtma.ru/" />
+    <meta property="og:image" content="https://wtma.ru/favicon/android-chrome-512x512.png" />
+
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Погода на 7 дней" />
+    <meta
+      name="twitter:description"
+      content="Удобный прогноз погоды на 7 дней: поиск города, геолокация и подробности по каждому дню."
+    />
+    <meta name="twitter:image" content="https://wtma.ru/favicon/android-chrome-512x512.png" />
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-STKTEPYLCX"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+
+      gtag('config', 'G-STKTEPYLCX');
+    </script>
+    <title>Погода на неделю</title>
+    <link rel="icon" href="./favicon/favicon.ico" sizes="any" />
+    <link rel="icon" href="./favicon/favicon.svg" type="image/svg+xml" />
+    <link rel="icon" href="./favicon/favicon-32x32.png" type="image/png" sizes="32x32" />
+    <link rel="icon" href="./favicon/favicon-16x16.png" type="image/png" sizes="16x16" />
+    <link rel="apple-touch-icon" href="./favicon/apple-touch-icon.png" sizes="180x180" />
+    <link rel="manifest" href="./favicon/site.webmanifest" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="bg" class="bg" aria-hidden="true">
+      <div class="bg__layer bg__layer--base"></div>
+      <div class="bg__layer bg__layer--aurora"></div>
+      <div class="bg__layer bg__layer--art"></div>
+      <div class="bg__layer bg__layer--mesh"></div>
+      <div class="bg__layer bg__layer--glow"></div>
+      <div class="bg__layer bg__layer--fx"></div>
+      <div class="bg__layer bg__layer--shade"></div>
+      <div id="bgRain" class="bg__rain" aria-hidden="true"></div>
+    </div>
+
+    <div class="app">
+      <header class="topbar">
+        <div class="topbar__title">
+          <h1>Погода на 7 дней</h1>
+          <p id="userCountLine" class="statline">Количество пользователей: <b id="userCount">—</b></p>
+          <p id="subtitle" class="subtitle">Выберите город или используйте геолокацию</p>
+        </div>
+
+        <div class="topbar__actions">
+          <button id="btnGeo" class="btn btn--icon" type="button" title="Моё местоположение" aria-label="Моё местоположение">
+            <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+              <path
+                d="M12 2a1 1 0 0 1 1 1v1.06A8.002 8.002 0 0 1 19.94 11H21a1 1 0 1 1 0 2h-1.06A8.002 8.002 0 0 1 13 19.94V21a1 1 0 1 1-2 0v-1.06A8.002 8.002 0 0 1 4.06 13H3a1 1 0 1 1 0-2h1.06A8.002 8.002 0 0 1 11 4.06V3a1 1 0 0 1 1-1Zm0 4a6 6 0 1 0 0 12 6 6 0 0 0 0-12Zm0 3a3 3 0 1 1 0 6 3 3 0 0 1 0-6Z"
+                fill="currentColor"
+              />
+            </svg>
+          </button>
+
+          <button id="btnTheme" class="btn btn--icon btn--theme" type="button" title="Тема" aria-label="Тема">
+            <span aria-hidden="true">☾</span>
+          </button>
+
+          <button id="btnUnits" class="btn btn--pill" type="button" title="Единицы измерения">°C</button>
+        </div>
+      </header>
+
+      <main class="layout">
+        <div class="side">
+          <section class="search">
+            <label class="searchbox" for="cityInput">
+              <span class="searchbox__icon" aria-hidden="true"></span>
+              <input id="cityInput" type="text" inputmode="search" autocomplete="off" placeholder="Город или населённый пункт" />
+              <button id="btnClear" class="searchbox__clear" type="button" title="Очистить" aria-label="Очистить" hidden>
+                <span aria-hidden="true">×</span>
+              </button>
+            </label>
+            <div id="suggestions" class="suggestions" hidden></div>
+            <div id="recent" class="recent" hidden></div>
+          </section>
+
+          <section id="status" class="status" hidden></section>
+
+          <section id="clock" class="clock" hidden></section>
+
+          <section id="current" class="current" hidden></section>
+        </div>
+
+        <section id="forecastSection">
+          <div class="section-title">
+            <span>Неделя</span>
+            <button id="btnRefresh" class="btn btn--ghost" type="button" title="Обновить">Обновить</button>
+          </div>
+          <div id="forecast" class="forecast" aria-live="polite"></div>
+        </section>
+
+        <section id="horoscopeSection" class="horoscope-section" aria-labelledby="horoscopeTitle">
+          <div class="section-title">
+            <span id="horoscopeTitle">&#1043;&#1086;&#1088;&#1086;&#1089;&#1082;&#1086;&#1087;&#32;&#1085;&#1072;&#32;&#1089;&#1077;&#1075;&#1086;&#1076;&#1085;&#1103;</span>
+            <button id="btnHoroscopeRefresh" class="btn btn--ghost" type="button" title="&#1054;&#1073;&#1085;&#1086;&#1074;&#1080;&#1090;&#1100;&#32;&#1075;&#1086;&#1088;&#1086;&#1089;&#1082;&#1086;&#1087;">&#1054;&#1073;&#1085;&#1086;&#1074;&#1080;&#1090;&#1100;</button>
+          </div>
+          <div id="horoscopeList" class="horoscope-forecast" aria-live="polite"></div>
+        </section>
+
+        <section id="installSection" class="install-section" aria-label="Установка приложения">
+          <p class="install-section__text">
+            Для удобного пользования web-приложением, добавьте его на главный экран, что бы всегда быть в курсе погоды в реальном времени.
+          </p>
+          <a
+            id="installLink"
+            class="install-section__action"
+            href="./install/"
+            rel="nofollow"
+            title="Посмотреть инструкцию"
+            aria-label="Посмотреть инструкцию"
+          >Посмотреть инструкцию</a>
+        </section>
+      </main>
+    </div>
+
+    <div id="sheetBackdrop" class="sheet-backdrop" hidden></div>
+    <div id="sheet" class="sheet" aria-hidden="true" role="dialog" aria-modal="true" aria-label="Детали прогноза">
+      <div class="sheet__handle" aria-hidden="true"></div>
+      <div id="sheetContent" class="sheet__content"></div>
+    </div>
+
+    <div id="horoscopePopupBackdrop" class="popup-backdrop" hidden></div>
+    <div id="horoscopePopup" class="horoscope-popup" role="dialog" aria-modal="true" aria-label="Выбор знака зодиака" hidden>
+      <div class="horoscope-popup__header">
+        <span class="horoscope-popup__title">Знак зодиака</span>
+        <button id="btnCloseHoroscopePopup" class="btn btn--icon" type="button" title="Закрыть" aria-label="Закрыть" style="width:36px;height:36px;">
+          <span aria-hidden="true" style="font-size:20px;line-height:1">×</span>
+        </button>
+      </div>
+      <div id="horoscopePopupList" class="horoscope-popup__list"></div>
+    </div>
+
+    <noscript>
+      <div class="noscript">Для работы приложения нужен JavaScript.</div>
+    </noscript>
+
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script type="module" src="./app.js"></script>
+    <script type="module" src="./pwa.js"></script>
+  </body>
+</html>
