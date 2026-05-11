@@ -1,11 +1,10 @@
 <!doctype html>
-<html lang="ru">
+<html lang="ru" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="color-scheme" content="dark light" />
-    <meta name="theme-color" content="#0b1020" media="(prefers-color-scheme: dark)" />
-    <meta name="theme-color" content="#f7f9ff" media="(prefers-color-scheme: light)" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0b1020" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Погода" />
@@ -117,6 +116,14 @@
           <div id="forecast" class="forecast" aria-live="polite"></div>
         </section>
 
+        <section id="horoscopeSection" class="horoscope-section" aria-labelledby="horoscopeTitle">
+          <div class="section-title">
+            <span id="horoscopeTitle">&#1043;&#1086;&#1088;&#1086;&#1089;&#1082;&#1086;&#1087;&#32;&#1085;&#1072;&#32;&#1089;&#1077;&#1075;&#1086;&#1076;&#1085;&#1103;</span>
+            <button id="btnHoroscopeRefresh" class="btn btn--ghost" type="button" title="&#1054;&#1073;&#1085;&#1086;&#1074;&#1080;&#1090;&#1100;&#32;&#1075;&#1086;&#1088;&#1086;&#1089;&#1082;&#1086;&#1087;">&#1054;&#1073;&#1085;&#1086;&#1074;&#1080;&#1090;&#1100;</button>
+          </div>
+          <div id="horoscopeList" class="horoscope-forecast" aria-live="polite"></div>
+        </section>
+
         <section id="installSection" class="install-section" aria-label="Установка приложения">
           <p class="install-section__text">
             Для удобного пользования web-приложением, добавьте его на главный экран, что бы всегда быть в курсе погоды в реальном времени.
@@ -137,6 +144,17 @@
     <div id="sheet" class="sheet" aria-hidden="true" role="dialog" aria-modal="true" aria-label="Детали прогноза">
       <div class="sheet__handle" aria-hidden="true"></div>
       <div id="sheetContent" class="sheet__content"></div>
+    </div>
+
+    <div id="horoscopePopupBackdrop" class="popup-backdrop" hidden></div>
+    <div id="horoscopePopup" class="horoscope-popup" role="dialog" aria-modal="true" aria-label="Выбор знака зодиака" hidden>
+      <div class="horoscope-popup__header">
+        <span class="horoscope-popup__title">Знак зодиака</span>
+        <button id="btnCloseHoroscopePopup" class="btn btn--icon" type="button" title="Закрыть" aria-label="Закрыть" style="width:36px;height:36px;">
+          <span aria-hidden="true" style="font-size:20px;line-height:1">×</span>
+        </button>
+      </div>
+      <div id="horoscopePopupList" class="horoscope-popup__list"></div>
     </div>
 
     <noscript>

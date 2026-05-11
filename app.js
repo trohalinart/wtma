@@ -7,7 +7,14 @@ const state = {
   theme: "dark", // fixed app theme
   location: null, // { name, admin1, country, latitude, longitude, timezone? }
   forecast: null, // api payload
+  horoscopeItems: [],
+  horoscopeCache: {},
+  horoscopeStatus: "idle", // idle | loading | ready | error
+  horoscopeError: "",
+  selectedHoroscopeSign: null, // null = все знаки, иначе id
+  horoscopeExpanded: new Set(), // для развернутого текста
   aborter: null,
+  horoscopeAborter: null,
   searchAborter: null,
   tgMainBound: false,
 };
@@ -29,12 +36,48 @@ const ui = {
   clock: $("#clock"),
   current: $("#current"),
   forecast: $("#forecast"),
+  horoscopeTitle: $("#horoscopeTitle"),
+  btnHoroscopeRefresh: $("#btnHoroscopeRefresh"),
+  btnHoroscopeSettings: $("#btnHoroscopeSettings"),
+  horoscopeList: $("#horoscopeList"),
+  horoscopePopup: $("#horoscopePopup"),
+  horoscopePopupBackdrop: $("#horoscopePopupBackdrop"),
+  horoscopePopupList: $("#horoscopePopupList"),
+  btnCloseHoroscopePopup: $("#btnCloseHoroscopePopup"),
   sheetBackdrop: $("#sheetBackdrop"),
   sheet: $("#sheet"),
   sheetContent: $("#sheetContent"),
 };
 
 const storageKey = "wxapp:v1";
+const horoscopeSourceName = "Astrocentr.ru";
+const horoscopeProxyBase = "https://api.codetabs.com/v1/proxy/?quest=";
+const horoscopeCacheLimit = 18;
+
+const horoscopeSigns = [
+  { id: "1", slug: "oven", label: "Овен" },
+  { id: "2", slug: "telec", label: "Телец" },
+  { id: "3", slug: "bliznecy", label: "Близнецы" },
+  { id: "4", slug: "rak", label: "Рак" },
+  { id: "5", slug: "lev", label: "Лев" },
+  { id: "6", slug: "deva", label: "Дева" },
+  { id: "7", slug: "vesy", label: "Весы" },
+  { id: "8", slug: "skorpion", label: "Скорпион" },
+  { id: "9", slug: "strelec", label: "Стрелец" },
+  { id: "10", slug: "kozloret", label: "Козерог" },
+  { id: "11", slug: "vodoley", label: "Водолей" },
+  { id: "12", slug: "ryby", label: "Рыбы" },
+];
+
+function horoscopePageUrl(signId) {
+  const sign = getHoroscopeSign(signId);
+  if (!sign) return "";
+  // Astrocentr.ru - Russian language horoscope
+  const url = new URL(`https://www.astrocentr.ru/index.php?przd=horoe&znak=${sign.id}`);
+  return url.toString();
+}
+
+const horoscopeSignsById = Object.fromEntries(horoscopeSigns.map((sign) => [sign.id, sign]));
 
 // --- fullscreen viewport sync (mobile Safari / Telegram WebView quirks) ---
 
@@ -182,6 +225,18 @@ function loadPrefs() {
     const data = JSON.parse(raw);
     if (data?.units === "metric" || data?.units === "imperial") state.units = data.units;
     if (data?.location && typeof data.location === "object") state.location = data.location;
+    if (data?.horoscopeCache && typeof data.horoscopeCache === "object") {
+      state.horoscopeCache = pruneHoroscopeCache(data.horoscopeCache);
+    }
+    if (data?.selectedHoroscopeSign !== undefined) {
+      state.selectedHoroscopeSign = isHoroscopeSignId(data.selectedHoroscopeSign) ? String(data.selectedHoroscopeSign) : null;
+    }
+    const cachedItems = horoscopeSigns.map((sign) => getCachedHoroscope(sign.id)).filter(Boolean);
+    if (cachedItems.length) {
+      state.horoscopeItems = cachedItems;
+      state.horoscopeStatus = cachedItems.length === horoscopeSigns.length ? "ready" : "idle";
+      state.horoscopeError = "";
+    }
   } catch {
     // ignore
   }
@@ -202,6 +257,164 @@ function savePrefs(extra = {}) {
     localStorage.setItem(storageKey, JSON.stringify(payload));
   } catch {
     // ignore
+  }
+}
+
+function isHoroscopeSignId(value) {
+  return Object.prototype.hasOwnProperty.call(horoscopeSignsById, String(value || ""));
+}
+
+function getHoroscopeSign(value) {
+  return horoscopeSignsById[String(value || "")] || null;
+}
+
+function currentLocalDateParts(date = new Date()) {
+  const d = date instanceof Date ? date : new Date(date);
+  return {
+    year: d.getFullYear(),
+    month: d.getMonth() + 1,
+    day: d.getDate(),
+  };
+}
+
+function horoscopeDayKey(date = new Date()) {
+  const { year, month, day } = currentLocalDateParts(date);
+  return `${year}${String(month).padStart(2, "0")}${String(day).padStart(2, "0")}`;
+}
+
+function horoscopeDisplayDate(date = new Date()) {
+  try {
+    return new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long" }).format(date);
+  } catch {
+    const { day, month } = currentLocalDateParts(date);
+    return `${day}.${String(month).padStart(2, "0")}`;
+  }
+}
+
+function formatHoroscopeUpdatedAt(value) {
+  const timestamp = Number(value);
+  if (!Number.isFinite(timestamp) || timestamp <= 0) return "Дата обновления неизвестна";
+
+  try {
+    return `Обновлено ${new Intl.DateTimeFormat("ru-RU", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(timestamp))}`;
+  } catch {
+    return `Обновлено ${new Date(timestamp).toLocaleString("ru-RU")}`;
+  }
+}
+
+function horoscopeProxyUrl(url) {
+  return `${horoscopeProxyBase}${encodeURIComponent(url)}`;
+}
+
+function normalizeInlineText(text) {
+  return String(text || "")
+    .replace(/\u00a0/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function hasReadableCyrillicText(text) {
+  const s = normalizeInlineText(text);
+  if (!s || s.includes("\uFFFD")) return false;
+
+  const cyrillicCount = (s.match(/[А-Яа-яЁё]/g) || []).length;
+  return cyrillicCount >= 8 || cyrillicCount / Math.max(s.length, 1) > 0.2;
+}
+
+function extractReadableParagraphText(root) {
+  if (!root) return "";
+
+  const parts = Array.from(root.querySelectorAll("p"))
+    .map((el) => normalizeInlineText(el.textContent))
+    .filter((text) => text.length >= 20 && hasReadableCyrillicText(text));
+
+  return normalizeInlineText(parts.join(" "));
+}
+
+function extractHoroscopeSourceDate(doc) {
+  const heading = Array.from(doc.querySelectorAll("h1"))
+    .map((el) => normalizeInlineText(el.textContent))
+    .find((text) => /сегодня/i.test(text) && /\d{1,2}\.\d{2}\.\d{2,4}/.test(text));
+
+  return (
+    heading?.match(/\d{1,2}\.\d{2}\.\d{2,4}/)?.[0] ||
+    new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long", year: "numeric" }).format(new Date())
+  );
+}
+
+function extractHoroscopeData(html, signId) {
+  const doc = new DOMParser().parseFromString(String(html || ""), "text/html");
+
+  const sourceDate = extractHoroscopeSourceDate(doc);
+  const signRoot = signId ? doc.getElementById(`horo${signId}`) : null;
+  const signText = extractReadableParagraphText(signRoot);
+
+  if (signText.length > 50) {
+    return {
+      sourceDate,
+      text: signText,
+    };
+  }
+
+  const content = doc.querySelector(".main_text, .content, #content, article, .horoscope");
+  const fallbackText = extractReadableParagraphText(content);
+
+  if (fallbackText.length > 50) {
+    return {
+      sourceDate,
+      text: fallbackText,
+    };
+  }
+
+  return null;
+}
+
+function horoscopeCacheKey(signId, dayKey = horoscopeDayKey()) {
+  return `${dayKey}:${String(signId || "")}`;
+}
+
+function pruneHoroscopeCache(cache) {
+  const entries = Object.entries(cache || {})
+    .filter(
+      ([, value]) =>
+        value &&
+        typeof value === "object" &&
+        isHoroscopeSignId(value.signId) &&
+        typeof value.summary === "string" &&
+        hasReadableCyrillicText(value.summary),
+    )
+    .sort((a, b) => Number(b[1]?.updatedAt || 0) - Number(a[1]?.updatedAt || 0))
+    .slice(0, horoscopeCacheLimit);
+
+  return Object.fromEntries(entries);
+}
+
+function getCachedHoroscope(signId, dayKey = horoscopeDayKey()) {
+  return state.horoscopeCache[horoscopeCacheKey(signId, dayKey)] || null;
+}
+
+function setCachedHoroscope(entry) {
+  if (!entry || !isHoroscopeSignId(entry.signId)) return;
+  state.horoscopeCache[horoscopeCacheKey(entry.signId, entry.dayKey)] = entry;
+  state.horoscopeCache = pruneHoroscopeCache(state.horoscopeCache);
+  savePrefs({
+    horoscopeCache: state.horoscopeCache,
+  });
+}
+
+function syncHoroscopeStaticText() {
+  if (ui.horoscopeTitle) ui.horoscopeTitle.textContent = "Гороскоп на сегодня";
+
+  if (ui.btnHoroscopeRefresh) {
+    ui.btnHoroscopeRefresh.textContent = "Обновить";
+    ui.btnHoroscopeRefresh.title = "Обновить гороскоп";
+    ui.btnHoroscopeRefresh.setAttribute("aria-label", "Обновить гороскоп");
   }
 }
 
@@ -1039,8 +1252,21 @@ function iconMiniUnits() {
 
 
 
+function uniqueTextParts(parts) {
+  const seen = new Set();
+  return parts.filter((part) => {
+    const text = normalizeInlineText(part);
+    if (!text) return false;
+
+    const key = text.toLocaleLowerCase("ru-RU");
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function formatPlace(loc) {
-  const parts = [loc?.name, loc?.admin1, loc?.country].filter(Boolean);
+  const parts = uniqueTextParts([loc?.name, loc?.admin1, loc?.country]);
   return parts.join(", ");
 }
 
@@ -1294,15 +1520,203 @@ function buildTodayRecommendations({ hourlyItems = [] } = {}) {
 
 async function apiJson(url, { signal } = {}) {
   const res = await fetch(url, { signal, headers: { accept: "application/json" } });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) {
+    if (res.status === 429) {
+      // Rate limit - wait a bit and retry once
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      const resRetry = await fetch(url, { signal, headers: { accept: "application/json" } });
+      if (!resRetry.ok) throw new Error(`HTTP ${resRetry.status}`);
+      return resRetry.json();
+    }
+    throw new Error(`HTTP ${res.status}`);
+  }
   return res.json();
 }
 
-async function searchPlaces(query, { signal } = {}) {
+function countReplacementChars(text) {
+  return (String(text || "").match(/\uFFFD/g) || []).length;
+}
+
+function decodeTextBuffer(buffer, contentType = "") {
+  const charset = /charset\s*=\s*["']?([^;"'\s]+)/i.exec(contentType)?.[1]?.toLowerCase();
+  const decode = (encoding) => {
+    try {
+      return new TextDecoder(encoding).decode(buffer);
+    } catch {
+      return "";
+    }
+  };
+
+  if (charset) {
+    const explicit = decode(charset);
+    if (explicit) return explicit;
+  }
+
+  const utf8 = decode("utf-8");
+  if (utf8 && countReplacementChars(utf8) === 0) return utf8;
+
+  const cp1251 = decode("windows-1251");
+  if (cp1251 && countReplacementChars(cp1251) < countReplacementChars(utf8)) return cp1251;
+
+  return utf8 || cp1251 || "";
+}
+
+async function readResponseText(res) {
+  const buffer = await res.arrayBuffer();
+  return decodeTextBuffer(buffer, res.headers.get("content-type") || "");
+}
+
+async function apiText(url, { signal } = {}) {
+  const res = await fetch(url, {
+    signal,
+    headers: { accept: "text/html, text/plain;q=0.9,*/*;q=0.8" },
+  });
+  if (!res.ok) {
+    if (res.status === 429) {
+      // Rate limit - wait a bit and retry once
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      const resRetry = await fetch(url, {
+        signal,
+        headers: { accept: "text/html, text/plain;q=0.9,*/*;q=0.8" },
+      });
+      if (!resRetry.ok) throw new Error(`HTTP ${resRetry.status}`);
+      return readResponseText(resRetry);
+    }
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return readResponseText(res);
+}
+
+async function translateTextToRussian(text, { signal } = {}) {
+  // MyMemory API is blocked, return text as-is
+  return text;
+}
+
+function shortenHoroscopeText(text, { maxChars = 500, maxSentences = 3 } = {}) {
+  const cleaned = normalizeInlineText(text);
+  if (!cleaned) return "";
+
+  const sentences = cleaned.match(/[^.!?]+[.!?]?/g)?.map((sentence) => sentence.trim()).filter(Boolean) || [cleaned];
+  const picked = [];
+
+  for (const sentence of sentences) {
+    if (picked.length >= maxSentences) break;
+    const next = picked.length ? `${picked.join(" ")} ${sentence}` : sentence;
+    if (next.length > maxChars && picked.length > 0) break;
+    picked.push(sentence);
+  }
+
+  const result = picked.join(" ").trim();
+  return result.length > maxChars ? result.slice(0, maxChars - 3) + "..." : result;
+}
+
+function hasCyrillic(text) {
+  return /[\u0400-\u04FF]/.test(String(text || ""));
+}
+
+function normalizeAliasKey(text) {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/ё/g, "е")
+    .replace(/[^\u0400-\u04FFa-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function transliterateCyrillicToLatin(text) {
+  const aliases = {
+    "санкт петербург": "Saint Petersburg",
+    "нью йорк": "New York",
+  };
+  const alias = aliases[normalizeAliasKey(text)];
+  if (alias) return alias;
+
+  const map = {
+    а: "a",
+    б: "b",
+    в: "v",
+    г: "g",
+    д: "d",
+    ж: "zh",
+    з: "z",
+    и: "i",
+    й: "y",
+    к: "k",
+    л: "l",
+    м: "m",
+    н: "n",
+    о: "o",
+    п: "p",
+    р: "r",
+    с: "s",
+    т: "t",
+    у: "u",
+    ф: "f",
+    х: "kh",
+    ц: "ts",
+    ч: "ch",
+    ш: "sh",
+    щ: "shch",
+    ы: "y",
+    э: "e",
+    ю: "yu",
+    я: "ya",
+    ь: "",
+    ъ: "",
+    қ: "q",
+    ғ: "g",
+    ҳ: "h",
+    ў: "o",
+  };
+
+  let out = "";
+  const lower = String(text || "").toLowerCase();
+  for (let i = 0; i < lower.length; i++) {
+    const ch = lower[i];
+    const prev = lower[i - 1] || "";
+    const atWordStart = i === 0 || /[\s-]/.test(prev);
+
+    if (ch === "е") out += atWordStart ? "ye" : "e";
+    else if (ch === "ё") out += "yo";
+    else out += map[ch] ?? ch;
+  }
+
+  return out.replace(/\s*-\s*/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function placeFeatureScore(place) {
+  const code = String(place?.feature_code || "").toUpperCase();
+  if (code === "PPLC") return 0;
+  if (code === "PPLA") return 1;
+  if (/^PPLA\d$/.test(code)) return 2;
+  if (code === "PPL") return 3;
+  return 10;
+}
+
+function sortPlaces(places) {
+  return [...places].sort((a, b) => {
+    const byFeature = placeFeatureScore(a) - placeFeatureScore(b);
+    if (byFeature !== 0) return byFeature;
+    return Number(b.population || 0) - Number(a.population || 0);
+  });
+}
+
+async function searchOpenMeteoPlaces(query, { signal } = {}) {
   const q = encodeURIComponent(query.trim());
   const url = `https://geocoding-api.open-meteo.com/v1/search?name=${q}&count=8&language=ru&format=json`;
   const data = await apiJson(url, { signal });
-  return Array.isArray(data?.results) ? data.results : [];
+  return sortPlaces(Array.isArray(data?.results) ? data.results : []);
+}
+
+async function searchPlaces(query, { signal } = {}) {
+  const original = query.trim();
+  const results = await searchOpenMeteoPlaces(original, { signal });
+  if (results.length || !hasCyrillic(original)) return results;
+
+  const fallbackQuery = transliterateCyrillicToLatin(original);
+  if (!fallbackQuery || fallbackQuery.toLowerCase() === original.toLowerCase()) return results;
+
+  return searchOpenMeteoPlaces(fallbackQuery, { signal });
 }
 
 async function reversePlace(lat, lon, { signal } = {}) {
@@ -1773,6 +2187,327 @@ function renderForecast() {
   });
 }
 
+function horoscopeSkeletonCards(count = horoscopeSigns.length) {
+  return Array.from({ length: count })
+    .map(
+      () => `
+      <article class="horoscope-card horoscope-card--placeholder" aria-hidden="true">
+        <div class="horoscope-card__head">
+          <div>
+            <div class="horoscope-card__sign" style="width:88px;height:16px;background:rgba(255,255,255,.08);border-radius:8px"></div>
+            <div class="horoscope-card__date" style="margin-top:8px;width:74px;height:12px;background:rgba(255,255,255,.06);border-radius:8px"></div>
+          </div>
+        </div>
+        <div class="horoscope-card__text" style="width:100%;height:74px;background:rgba(255,255,255,.05);border-radius:12px"></div>
+      </article>
+    `,
+    )
+    .join("");
+}
+
+function buildHoroscopeErrorItem(sign, message) {
+  return {
+    signId: sign.id,
+    signLabel: sign.label,
+    dayKey: horoscopeDayKey(),
+    sourceName: horoscopeSourceName,
+    sourceUrl: horoscopePageUrl(sign.id),
+    sourceDate: "",
+    originalText: "",
+    translatedText: "",
+    summary: "",
+    error: true,
+    errorMessage: message,
+    updatedAt: Date.now(),
+  };
+}
+
+async function fetchHoroscopeEntry(sign, { force = false, signal } = {}) {
+  if (!sign) return null;
+
+  if (!force) {
+    const cached = getCachedHoroscope(sign.id);
+    if (cached) return cached;
+  }
+
+  const sourceUrl = horoscopePageUrl(sign.id);
+  const html = await apiText(horoscopeProxyUrl(sourceUrl), { signal });
+  const parsed = extractHoroscopeData(html, sign.id);
+  if (!parsed?.text) throw new Error(`Horoscope text not found for sign ${sign.id}`);
+
+  // Source is already in Russian
+  const translatedText = parsed.text;
+
+  if (signal?.aborted) return null;
+
+  const entry = {
+    signId: sign.id,
+    signLabel: sign.label,
+    dayKey: horoscopeDayKey(),
+    sourceName: horoscopeSourceName,
+    sourceUrl,
+    sourceDate: parsed.sourceDate,
+    originalText: parsed.text,
+    translatedText,
+    summary: shortenHoroscopeText(translatedText),
+    error: false,
+    errorMessage: "",
+    updatedAt: Date.now(),
+  };
+
+  setCachedHoroscope(entry);
+  return entry;
+}
+
+async function mapHoroscopeSigns(signs, limit, mapper) {
+  const target = Array.isArray(signs) && signs.length ? signs : horoscopeSigns;
+  const size = Math.max(1, Math.min(Number(limit) || 1, target.length));
+  const results = new Array(target.length);
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < target.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await mapper(target[index], index);
+    }
+  }
+
+  await Promise.all(Array.from({ length: size }, () => worker()));
+  return results;
+}
+
+async function loadHoroscopes({ force = false } = {}) {
+  if (state.horoscopeAborter) state.horoscopeAborter.abort();
+  const aborter = new AbortController();
+  state.horoscopeAborter = aborter;
+
+  const targetSigns = state.selectedHoroscopeSign
+    ? horoscopeSigns.filter((s) => s.id === state.selectedHoroscopeSign)
+    : horoscopeSigns;
+
+  const cachedItems = targetSigns.map((sign) => getCachedHoroscope(sign.id)).filter(Boolean);
+  if (cachedItems.length) {
+    if (state.selectedHoroscopeSign) {
+      state.horoscopeItems = cachedItems;
+    } else {
+      const byId = new Map(state.horoscopeItems.map((i) => [i.signId, i]));
+      cachedItems.forEach((i) => byId.set(i.signId, i));
+      state.horoscopeItems = horoscopeSigns.map((s) => byId.get(s.id)).filter(Boolean);
+    }
+  }
+
+  state.horoscopeStatus = "loading";
+  state.horoscopeError = "";
+  renderHoroscope();
+
+  try {
+    const items = await mapHoroscopeSigns(targetSigns, targetSigns.length === 1 ? 1 : 3, async (sign) => {
+      try {
+        return await fetchHoroscopeEntry(sign, { force, signal: aborter.signal });
+      } catch (err) {
+        if (aborter.signal.aborted) return null;
+        console.error(err);
+        return getCachedHoroscope(sign.id) || buildHoroscopeErrorItem(sign, "Не удалось загрузить прогноз.");
+      }
+    });
+
+    if (aborter.signal.aborted) return;
+
+    const readyItems = items.filter(Boolean);
+    const successCount = readyItems.filter((item) => !item.error).length;
+
+    if (state.selectedHoroscopeSign) {
+      state.horoscopeItems = readyItems;
+    } else {
+      const byId = new Map(state.horoscopeItems.map((i) => [i.signId, i]));
+      readyItems.forEach((i) => byId.set(i.signId, i));
+      state.horoscopeItems = horoscopeSigns.map((s) => byId.get(s.id)).filter(Boolean);
+    }
+
+    state.horoscopeStatus = successCount ? "ready" : "error";
+    state.horoscopeError = successCount ? "" : "Не удалось загрузить гороскопы. Попробуйте обновить чуть позже.";
+    renderHoroscope();
+  } catch (err) {
+    if (aborter.signal.aborted) return;
+    console.error(err);
+    state.horoscopeStatus = "error";
+    state.horoscopeError = "Не удалось загрузить гороскопы. Попробуйте обновить чуть позже.";
+    if (!state.horoscopeItems.length) {
+      state.horoscopeItems = targetSigns.map((sign) => buildHoroscopeErrorItem(sign, "Нет данных."));
+    }
+    renderHoroscope();
+  } finally {
+    if (state.horoscopeAborter === aborter) state.horoscopeAborter = null;
+  }
+}
+
+function openHoroscopePopup() {
+  if (!ui.horoscopePopup || !ui.horoscopePopupBackdrop) return;
+  renderHoroscopePopupList();
+  ui.horoscopePopupBackdrop.hidden = false;
+  ui.horoscopePopup.hidden = false;
+  void ui.horoscopePopup.offsetWidth;
+  ui.horoscopePopup.classList.add("horoscope-popup--open");
+  ui.btnHoroscopeSettings?.setAttribute("aria-expanded", "true");
+}
+
+function closeHoroscopePopup() {
+  if (!ui.horoscopePopup || !ui.horoscopePopupBackdrop) return;
+  ui.horoscopePopup.classList.remove("horoscope-popup--open");
+  ui.btnHoroscopeSettings?.setAttribute("aria-expanded", "false");
+  setTimeout(() => {
+    ui.horoscopePopupBackdrop.hidden = true;
+    ui.horoscopePopup.hidden = true;
+  }, 180);
+}
+
+function selectHoroscopeSign(signId) {
+  const next = isHoroscopeSignId(signId) ? String(signId) : null;
+  if (state.selectedHoroscopeSign === next) {
+    closeHoroscopePopup();
+    return;
+  }
+  state.selectedHoroscopeSign = next;
+  savePrefs({ selectedHoroscopeSign: next });
+  closeHoroscopePopup();
+  renderHoroscope();
+  loadHoroscopes().catch((err) => console.error(err));
+}
+
+function renderHoroscopePopupList() {
+  if (!ui.horoscopePopupList) return;
+
+  const allOption = `
+    <button class="horoscope-popup__item ${state.selectedHoroscopeSign === null ? "horoscope-popup__item--active" : ""}" type="button" data-sign="">
+      <span>Все знаки</span>
+      <span class="horoscope-popup__check">✓</span>
+    </button>
+  `;
+
+  const signsHtml = horoscopeSigns
+    .map(
+      (sign) => `
+    <button class="horoscope-popup__item ${state.selectedHoroscopeSign === sign.id ? "horoscope-popup__item--active" : ""}" type="button" data-sign="${escapeHtml(sign.id)}">
+      <span>${escapeHtml(sign.label)}</span>
+      <span class="horoscope-popup__check">✓</span>
+    </button>
+  `,
+    )
+    .join("");
+
+  ui.horoscopePopupList.innerHTML = allOption + signsHtml;
+
+  ui.horoscopePopupList.querySelectorAll("[data-sign]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const signId = btn.dataset.sign;
+      selectHoroscopeSign(signId || null);
+    });
+  });
+}
+
+const settingsIconSvg = `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" fill="currentColor" opacity=".9"/><path d="M19.4 13a7.8 7.8 0 0 0 0-2l2.1-1.6a.5.5 0 0 0 .1-.7l-2-3.5a.5.5 0 0 0-.6-.2l-2.5 1a7.6 7.6 0 0 0-1.7-1l-.4-2.6a.5.5 0 0 0-.5-.4h-4a.5.5 0 0 0-.5.4l-.4 2.6a7.6 7.6 0 0 0-1.7 1l-2.5-1a.5.5 0 0 0-.6.2l-2 3.5a.5.5 0 0 0 .1.7l2.1 1.6a7.8 7.8 0 0 0 0 2l-2.1 1.6a.5.5 0 0 0-.1.7l2 3.5a.5.5 0 0 0 .6.2l2.5-1a7.6 7.6 0 0 0 1.7 1l.4 2.6a.5.5 0 0 0 .5.4h4a.5.5 0 0 0 .5-.4l.4-2.6a7.6 7.6 0 0 0 1.7-1l2.5 1a.5.5 0 0 0 .6-.2l2-3.5a.5.5 0 0 0-.1-.7L19.4 13Z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
+function renderHoroscope() {
+  if (!ui.horoscopeList || !ui.btnHoroscopeRefresh) return;
+
+  syncHoroscopeStaticText();
+
+  const isLoading = state.horoscopeStatus === "loading";
+  const itemsById = new Map(
+    (Array.isArray(state.horoscopeItems) ? state.horoscopeItems : [])
+      .filter((item) => item && isHoroscopeSignId(item.signId))
+      .map((item) => [String(item.signId), item]),
+  );
+
+  ui.btnHoroscopeRefresh.disabled = isLoading;
+
+  const signsToRender = state.selectedHoroscopeSign
+    ? horoscopeSigns.filter((s) => s.id === state.selectedHoroscopeSign)
+    : horoscopeSigns;
+
+  if (state.selectedHoroscopeSign) {
+    ui.horoscopeList.classList.add("horoscope-forecast--single");
+  } else {
+    ui.horoscopeList.classList.remove("horoscope-forecast--single");
+  }
+
+  if (isLoading && itemsById.size === 0) {
+    ui.horoscopeList.innerHTML = horoscopeSkeletonCards(signsToRender.length);
+    bindWheelToHorizontalScroll(ui.horoscopeList);
+    return;
+  }
+
+  ui.horoscopeList.innerHTML = signsToRender
+    .map((sign) => {
+      const item = itemsById.get(sign.id);
+      const settingsBtn = `<button class="horoscope-card__settings" type="button" title="Выбрать знак" data-settings>${settingsIconSvg}</button>`;
+
+      if (!item) {
+        return `
+          <article class="horoscope-card horoscope-card--placeholder">
+            <div class="horoscope-card__head">
+              <div>
+                <div class="horoscope-card__sign">${escapeHtml(sign.label)}</div>
+                <div class="horoscope-card__date">Обновляется...</div>
+              </div>
+              ${settingsBtn}
+            </div>
+            <p class="horoscope-card__hint">Подтягиваю прогноз для этого знака…</p>
+          </article>
+        `;
+      }
+
+      if (item.error) {
+        return `
+          <article class="horoscope-card horoscope-card--error">
+            <div class="horoscope-card__head">
+              <div>
+                <div class="horoscope-card__sign">${escapeHtml(item.signLabel || sign.label)}</div>
+                <div class="horoscope-card__date">${escapeHtml(formatHoroscopeUpdatedAt(item.updatedAt))}</div>
+              </div>
+              ${settingsBtn}
+            </div>
+            <p class="horoscope-card__hint">${escapeHtml(item.errorMessage || "Не удалось загрузить прогноз.")}</p>
+          </article>
+        `;
+      }
+
+      const summary = item.summary || shortenHoroscopeText(item.translatedText || item.originalText || "");
+
+      return `
+        <article class="horoscope-card">
+          <div class="horoscope-card__head">
+            <div>
+              <div class="horoscope-card__sign">${escapeHtml(item.signLabel || sign.label)}</div>
+              <div class="horoscope-card__date">${escapeHtml(formatHoroscopeUpdatedAt(item.updatedAt))}</div>
+            </div>
+            ${settingsBtn}
+          </div>
+          <p class="horoscope-card__text">${escapeHtml(summary)}</p>
+          <div class="horoscope-card__footer">
+            <a
+              class="horoscope-card__source"
+              href="${escapeHtml(item.sourceUrl)}"
+              target="_blank"
+              rel="noopener noreferrer nofollow"
+            >Источник: ${escapeHtml(item.sourceName)}</a>
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+
+  ui.horoscopeList.querySelectorAll("[data-settings]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openHoroscopePopup();
+    });
+  });
+
+  bindWheelToHorizontalScroll(ui.horoscopeList);
+}
+
 function openDetails(idx) {
   const daily = state.forecast?.daily;
   if (!daily) return;
@@ -1904,6 +2639,13 @@ function renderAll() {
   renderCurrent();
   applyWeatherBackground();
   renderForecast();
+  try {
+    renderHoroscope();
+  } catch (err) {
+    console.error("Horoscope render failed", err);
+    state.horoscopeStatus = "error";
+    state.horoscopeError = "Не удалось отрисовать гороскоп.";
+  }
   syncTelegramMainButton();
 }
 
@@ -2036,7 +2778,7 @@ const onSearchInput = debounce(async () => {
       .slice(0, 8)
       .map((r) => {
         const primary = escapeHtml(r.name);
-        const secondary = escapeHtml([r.admin1, r.country].filter(Boolean).join(", "));
+        const secondary = escapeHtml(uniqueTextParts([r.name, r.admin1, r.country]).slice(1).join(", "));
         return `
           <button type="button" data-lat="${r.latitude}" data-lon="${r.longitude}">
             <div>${primary}</div>
@@ -2222,6 +2964,7 @@ function initTelegram() {
 function init() {
   initViewportSync();
   loadPrefs();
+  syncHoroscopeStaticText();
   initTheme();
   initBackgroundInteraction();
   initTelegram();
@@ -2239,13 +2982,27 @@ function init() {
   });
   ui.cityInput.addEventListener("input", onSearchInput);
   ui.cityInput.addEventListener("focus", () => ui.cityInput.value.trim().length >= 2 && onSearchInput());
+  ui.btnHoroscopeRefresh?.addEventListener("click", () => loadHoroscopes({ force: true }));
+  ui.btnHoroscopeSettings?.addEventListener("click", openHoroscopePopup);
+  ui.btnCloseHoroscopePopup?.addEventListener("click", closeHoroscopePopup);
+  ui.horoscopePopupBackdrop?.addEventListener("click", closeHoroscopePopup);
 
   ui.sheetBackdrop.addEventListener("click", closeDetails);
-  document.addEventListener("keydown", (e) => e.key === "Escape" && closeDetails());
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (ui.horoscopePopup && !ui.horoscopePopup.hidden && ui.horoscopePopup.classList.contains("horoscope-popup--open")) {
+      closeHoroscopePopup();
+      return;
+    }
+    closeDetails();
+  });
 
   renderAll();
   if (state.location) loadForecast(state.location);
   else renderRecent();
+  window.setTimeout(() => {
+    loadHoroscopes().catch((err) => console.error(err));
+  }, 0);
 }
 
 init();
