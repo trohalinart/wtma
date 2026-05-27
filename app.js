@@ -1423,6 +1423,69 @@ function hourlyNextHoursItems(hoursAhead = 12) {
   return items;
 }
 
+function hourlyDayItems(dateISO, hoursAhead = 12) {
+  const hourly = state.forecast?.hourly;
+  const time = hourly?.time;
+  if (!Array.isArray(time) || time.length === 0) return [];
+
+  const day = String(dateISO || "").slice(0, 10);
+  const limit = Math.max(0, Math.floor(Number(hoursAhead) || 0));
+  if (!day || !limit) return [];
+
+  const temperature = Array.isArray(hourly.temperature_2m) ? hourly.temperature_2m : [];
+  const code = Array.isArray(hourly.weather_code) ? hourly.weather_code : [];
+  const isDay = Array.isArray(hourly.is_day) ? hourly.is_day : [];
+  const precipProb = Array.isArray(hourly.precipitation_probability) ? hourly.precipitation_probability : null;
+
+  const items = [];
+  for (let i = 0; i < time.length; i++) {
+    const ts = time[i];
+    if (typeof ts !== "string" || !ts.startsWith(`${day}T`)) continue;
+
+    const t = Number(temperature[i]);
+    const wmo = Number(code[i]);
+    const d = isDay[i];
+    const pop = precipProb ? Number(precipProb[i]) : NaN;
+
+    items.push({
+      time: ts.slice(11, 16),
+      temp: Number.isFinite(t) ? Math.round(t) : null,
+      wmo,
+      isDay: d === 1 || d === true,
+      pop: Number.isFinite(pop) ? Math.round(pop) : null,
+    });
+
+    if (items.length >= limit) break;
+  }
+
+  return items;
+}
+
+function renderHourlyForecast(hourlyItems) {
+  if (!Array.isArray(hourlyItems) || hourlyItems.length === 0) return "";
+
+  return `
+    <div class="current__hourly">
+      <div class="current__hourly-title">По часам на 12 часов вперёд</div>
+      <div class="hourly" data-hourly-scroll role="list" aria-label="Погода по часам на 12 часов вперёд">
+        ${hourlyItems
+          .map((x) => {
+            const infoH = wmoInfo(x.wmo, x.isDay);
+            const tempH = Number.isFinite(x.temp) ? `${x.temp}${unitsLabel()}` : "—";
+            return `
+              <div class="hour" role="listitem" title="${escapeHtml(infoH.label)}">
+                <div class="hour__time">${escapeHtml(x.time)}</div>
+                <div class="hour__icon" aria-hidden="true">${infoH.icon}</div>
+                <div class="hour__temp">${escapeHtml(tempH)}</div>
+              </div>
+            `;
+          })
+          .join("")}
+      </div>
+    </div>
+  `;
+}
+
 function bindWheelToHorizontalScroll(el) {
   if (!el || el.dataset.wheelScrollBound) return;
   el.dataset.wheelScrollBound = "1";
@@ -2058,28 +2121,7 @@ function renderCurrent() {
   const desc = info.label;
 
   const hourlyItems = hourlyNextHoursItems(12);
-  const hourlyHtml = hourlyItems.length
-    ? `
-      <div class="current__hourly">
-        <div class="current__hourly-title">По часам на 12 часов вперёд</div>
-        <div class="hourly" data-hourly-scroll role="list" aria-label="Погода по часам на 12 часов вперёд">
-          ${hourlyItems
-            .map((x) => {
-              const infoH = wmoInfo(x.wmo, x.isDay);
-              const tempH = Number.isFinite(x.temp) ? `${x.temp}${unitsLabel()}` : "—";
-              return `
-                <div class="hour" role="listitem" title="${escapeHtml(infoH.label)}">
-                  <div class="hour__time">${escapeHtml(x.time)}</div>
-                  <div class="hour__icon" aria-hidden="true">${infoH.icon}</div>
-                  <div class="hour__temp">${escapeHtml(tempH)}</div>
-                </div>
-              `;
-            })
-            .join("")}
-        </div>
-      </div>
-    `
-    : "";
+  const hourlyHtml = renderHourlyForecast(hourlyItems);
 
   const tips = buildTodayRecommendations({ hourlyItems: hourlyToEndOfDayItems() });
   const tipsHtml = tips.length
@@ -2527,6 +2569,7 @@ function openDetails(idx) {
   const wi = Math.round(daily.wind_speed_10m_max?.[idx] ?? 0);
   const sunrise = (daily.sunrise?.[idx] || "").slice(11, 16);
   const sunset = (daily.sunset?.[idx] || "").slice(11, 16);
+  const hourlyHtml = renderHourlyForecast(hourlyDayItems(dateISO, 12));
 
   ui.sheetContent.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
@@ -2542,56 +2585,14 @@ function openDetails(idx) {
       <div class="kv"><div class="k">Ветер (макс)</div><div class="v">${escapeHtml(String(wi))} ${windUnit()}</div></div>
       <div class="kv"><div class="k">Восход / закат</div><div class="v">${escapeHtml(sunrise || "—")} / ${escapeHtml(sunset || "—")}</div></div>
     </div>
-    ${renderTempChart()}
+    ${hourlyHtml}
     <button id="btnCloseSheet" class="btn" type="button">Закрыть</button>
   `;
 
   $("#btnCloseSheet")?.addEventListener("click", closeDetails);
+  const hourlyScroller = ui.sheetContent.querySelector("[data-hourly-scroll]");
+  if (hourlyScroller) bindWheelToHorizontalScroll(hourlyScroller);
   showSheet();
-}
-
-function renderTempChart() {
-  const daily = state.forecast?.daily;
-  if (!daily) return "";
-  const tmax = (daily.temperature_2m_max || []).slice(1, 8).map((x) => Number(x));
-  const tmin = (daily.temperature_2m_min || []).slice(1, 8).map((x) => Number(x));
-  if (tmax.length < 2 || tmin.length < 2) return "";
-
-  const all = [...tmax, ...tmin];
-  const lo = Math.min(...all);
-  const hi = Math.max(...all);
-  const pad = Math.max(2, (hi - lo) * 0.12);
-  const minY = lo - pad;
-  const maxY = hi + pad;
-
-  const W = 320;
-  const H = 92;
-  const step = W / (tmax.length - 1);
-  const y = (temp) => {
-    const t = (temp - minY) / (maxY - minY);
-    return Math.round((1 - t) * (H - 12) + 6);
-  };
-
-  const points = (arr) => arr.map((temp, i) => `${Math.round(i * step)},${y(temp)}`).join(" ");
-
-  const maxPts = points(tmax);
-  const minPts = points(tmin);
-
-  const label = state.units === "metric" ? "Температура, °C" : "Температура, °F";
-
-  return `
-    <div class="chart" aria-label="${escapeHtml(label)}">
-      <div class="subtitle" style="margin:0 0 8px">${escapeHtml(label)}</div>
-      <svg viewBox="0 0 ${W} ${H}" role="img" aria-hidden="true">
-        <polyline points="${escapeHtml(maxPts)}" fill="none" stroke="rgba(110,231,255,.9)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
-        <polyline points="${escapeHtml(minPts)}" fill="none" stroke="rgba(167,139,250,.9)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
-      </svg>
-      <div class="subtitle" style="display:flex;flex-wrap:wrap;gap:12px;margin:0">
-        <span>Макс: <b style="color:var(--fg)">${Math.round(Math.max(...tmax))}${unitsLabel()}</b></span>
-        <span>Мин: <b style="color:var(--fg)">${Math.round(Math.min(...tmin))}${unitsLabel()}</b></span>
-      </div>
-    </div>
-  `;
 }
 
 function showSheet() {
